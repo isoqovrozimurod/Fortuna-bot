@@ -1,14 +1,8 @@
 # Telegram bot uchun
 aiogram==3.2.0        # Bot framework (Telegram API 6.x)
 
-# CRON‑vazifalar uchun
-aiocron==1.7        # asyncio cron‑jadvali
-
 # Konfiguratsiya / .env
 python-dotenv==1.0.1  # .env o‘zgaruvchilarini yuklash
 
 # Jadval rasmlari
 matplotlib==3.8.4     # Grafik/jadval chizish
-pillow==9.5.0         # Matplotlib PNG‑larni saqlashi uchun
-
-# (aiogram o‘zi bilan birga aiohttp va boshqa bog‘liqliklarni o‘rnatadi)

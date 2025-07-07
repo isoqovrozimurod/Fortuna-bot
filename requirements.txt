@@ -1,5 +1,5 @@
 # Telegram bot uchun
-aiogram==3.2.0        # Bot framework (Telegram API 6.x)
+aiogram==3.7.0        # Bot framework (Telegram API 6.x)
 
 # Konfiguratsiya / .env
 python-dotenv==1.0.1  # .env o‘zgaruvchilarini yuklash

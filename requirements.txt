@@ -2,7 +2,7 @@
 aiogram==3.2.0        # Bot framework (Telegram API 6.x)
 
 # CRON‑vazifalar uchun
-aiocron==1.7.1        # asyncio cron‑jadvali
+aiocron==1.7        # asyncio cron‑jadvali
 
 # Konfiguratsiya / .env
 python-dotenv==1.0.1  # .env o‘zgaruvchilarini yuklash

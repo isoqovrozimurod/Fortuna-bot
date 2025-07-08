@@ -1,7 +1,7 @@
 O'zbek tilida
 # 🤖 Fortuna-bot
 
-**Fortuna-bot** — bu Telegram bot bo‘lib, foydalanuvchilarga Fortuna Biznes Mikromoliya Tashkilotining turli kredit turlari bo‘yicha ma’lumot berish, hisob-kitob qilish va kredit grafigini ko‘rish imkonini beradi.
+**Fortuna-bot** — bu Telegram bot bo‘lib, foydalanuvchilarga Fortuna Biznes Mikromoliya Tashkilotining kredit turlari bo‘yicha ma’lumot berish, hisob-kitob qilish va kredit grafigini ko‘rish imkonini beradi.
 
 ![Python](https://img.shields.io/badge/Python-3.12%2B-blue)
 ![Aiogram](https://img.shields.io/badge/Aiogram-3.7.0-blue)

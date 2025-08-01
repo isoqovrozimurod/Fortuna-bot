@@ -8,6 +8,7 @@ async def garov_info(callback: CallbackQuery):
     text = (
         "🚗 <b>Avtomashina garov asosida kredit:</b>\n\n"
         "- 2000-yildan yuqori mashinalar garovga olinadi\n"
+        "- So'ngi 5 yilda ishlab chiqarilgan Avtomashinalar uchun 6% chegirma mavjud\n"
         "- Garov mashina egasining nomida bo‘lishi shart\n"
         "  (yoki ishonchnomada sotish va garovga qo'yish huquqi bo‘lishi kerak)\n"
         "- Kredit muddati: 12 – 36 oy\n"

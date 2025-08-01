@@ -10,7 +10,6 @@ async def ish_haqi_info(callback: CallbackQuery):
         "- Rasmiy daromadga ega shaxslarga\n"
         "- Kredit muddati: 12 – 36 oy\n"
         "- Kredit summasi: 3 - 20 mln so'mgacha\n"
-        #"- Taʼlim va Tibbiyot sohasida ishlaydiganlar uchun garovsiz – 25 mln soʼmgacha\n"
         "- Kafil asosida: 20 - 40 mln so'mgacha\n"
         "- Talab qilinadi: pasport, ish haqi plastik kartasi,\n"
         "  (harbiylar uchun ish joyidan ish haqi ma’lumotnomasi)"

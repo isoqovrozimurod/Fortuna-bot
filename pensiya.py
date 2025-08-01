@@ -8,9 +8,9 @@ async def show_pensiya_info(callback: CallbackQuery, bot: Bot):
     text = (
         "✅ <b>Pensiya asosida kredit:</b>\n\n"
         "- Faqatgina qarilik pensiya olish huquqiga ega shaxslarga\n"
-        "- Pensiya miqdori 900 ming soʻmdan kam boʻlmasligi kerak\n"
+        "- Pensiya miqdori 750 ming soʻmdan kam boʻlmasligi kerak\n"
         "- Kredit muddati: 12 – 18 oy\n"
-        "- Kredit summasi: 3 – 10 mln so'mgacha\n"
+        "- Kredit summasi: 3 – 20 mln so'mgacha\n"
         "- Kerakli hujjat: pasport, pensiya plastik kartasi"
     )
 

@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 
 router = Router()
 
@@ -8,7 +8,7 @@ async def garov_info(callback: CallbackQuery):
     text = (
         "🚗 <b>Avtomashina garov asosida kredit:</b>\n\n"
         "- 2000-yildan yuqori mashinalar garovga olinadi\n"
-        "- So'ngi 5 yilda ishlab chiqarilgan Avtomashinalar uchun 6% chegirma mavjud\n"
+        "- So'ngi 5 yilda ishlab chiqarilgan Avtomashinalar uchun hozirgi foiz stavkasidan 6% chegirma mavjud\n"
         "- Garov mashina egasining nomida bo‘lishi shart\n"
         "  (yoki ishonchnomada sotish va garovga qo'yish huquqi bo‘lishi kerak)\n"
         "- Kredit muddati: 12 – 36 oy\n"
@@ -22,4 +22,10 @@ async def garov_info(callback: CallbackQuery):
         [InlineKeyboardButton(text="⬅️ Ortga", callback_data="credit_types")]
     ])
 
-    await callback.message.edit_text(text=text, reply_markup=markup)
+    photo = InputFile("temp/Fortuna_rek.jpg")
+
+    # Avvalgi xabarni o‘chiramiz
+    await callback.message.delete()
+
+    # Yangi rasm + matn bilan yuboriladi
+    await callback.message.answer_photo(photo=photo, caption=text, reply_markup=markup, parse_mode="HTML")

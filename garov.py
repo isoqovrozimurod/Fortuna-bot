@@ -23,7 +23,7 @@ async def garov_info(callback: CallbackQuery):
         [InlineKeyboardButton(text="⬅️ Ortga", callback_data="credit_types")]
     ])
 
-    photo_path = "temp/Fortuna_rek.jpg"
+    photo_path = "temp/fortuna_rek.jpg"
     if os.path.exists(photo_path):
         with open(photo_path, "rb") as image:
             photo = InputFile(image)

@@ -1,5 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+import os
 
 router = Router()
 
@@ -22,10 +23,10 @@ async def garov_info(callback: CallbackQuery):
         [InlineKeyboardButton(text="⬅️ Ortga", callback_data="credit_types")]
     ])
 
-    photo = InputFile("temp/Fortuna_rek.jpg")
-
-    # Avvalgi xabarni o‘chiramiz
-    await callback.message.delete()
-
-    # Yangi rasm + matn bilan yuboriladi
-    await callback.message.answer_photo(photo=photo, caption=text, reply_markup=markup, parse_mode="HTML")
+    photo_path = "temp/Fortuna_rek.jpg"
+    if os.path.exists(photo_path):
+        with open(photo_path, "rb") as image:
+            photo = InputFile(image)
+            await callback.message.answer_photo(photo=photo, caption=text, reply_markup=markup)
+    else:
+        await callback.message.answer("🖼 Rasm topilmadi.", reply_markup=markup)

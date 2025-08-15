@@ -144,7 +144,7 @@ async def ask_sum(cb: CallbackQuery, state: FSMContext):
     await cb.message.answer(
         f"💳 <b>{cfg['name']}</b>\n"
         f"Kredit summasini kiriting:\n"
-        f"({fmt(cfg['min'])} – {fmt(cfg['max'])} so‘m)",
+        f"({fmt(cfg['min'])} – {fmt(cfg['max'])}) so‘m",
         parse_mode=ParseMode.HTML,
         reply_markup=BACK_KB,
     )
@@ -164,7 +164,7 @@ async def ask_months(msg: types.Message, state: FSMContext):
     await state.update_data(summa=summa)
     await state.set_state(CalcFSM.month)
     await msg.answer(
-        f"📆 Muddatni kiriting ({cfg['mmin']} – {cfg['mmax']} oy):",
+        f"📆 Muddatni kiriting ({cfg['mmin']} – {cfg['mmax']}) oy:",
         reply_markup=BACK_KB,
     )
 
@@ -172,7 +172,7 @@ async def ask_months(msg: types.Message, state: FSMContext):
 @router.message(CalcFSM.month)
 async def result(msg: types.Message, bot: Bot, state: FSMContext):
     if not msg.text.isdigit():
-        return await msg.answer("❗️Muddatni butun oyda kiriting.")
+        return await msg.answer("❗️Muddatni faqat raqam ko'rinishida kiriting.")
     months = int(msg.text)
     data = await state.get_data()
     cfg = CFG[data["code"]]

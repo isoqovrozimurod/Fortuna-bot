@@ -22,10 +22,10 @@ class CalcFSM(StatesGroup):
 CFG = {
     "calc_pension": {
         "name": "Pensiya krediti", "rate": 49,
-        "min": 3_000_000, "max": 10_000_000, "mmin": 12, "mmax": 18},
+        "min": 3_000_000, "max": 20_000_000, "mmin": 12, "mmax": 18},
     "calc_salary": {
         "name": "Ish haqi krediti", "rate": 49,
-        "min": 3_000_000, "max": 20_000_000, "mmin": 12, "mmax": 36},
+        "min": 3_000_000, "max": 40_000_000, "mmin": 12, "mmax": 36},
     "calc_auto": {
         "name": "Avto garov krediti", "rate": 48,
         "min": 3_000_000, "max": 300_000_000, "mmin": 12, "mmax": 36},

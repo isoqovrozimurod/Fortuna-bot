@@ -6,7 +6,7 @@ async def set_bot_commands(bot: Bot):
     """Bot menyusiga komandalarni o‘rnatadi"""
     commands = [
         BotCommand(command="start", description="Botni ishga tushurish"),
-        BotCommand(command="product", description="Kredit turlarini ko‘rish"),
+        BotCommand(command="kredit_turlari", description="Kredit turlarini ko‘rish"),
         BotCommand(command="manzil", description="Bizning manzilimiz"),
         BotCommand(command="kredit", description="Admin uchun"),
     ]

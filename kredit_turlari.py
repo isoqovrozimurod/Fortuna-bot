@@ -9,7 +9,7 @@ from aiogram.types import (
 
 router = Router()
 
-# /product komandasi uchun
+# /kredit_turlari komandasi uchun
 @router.message(Command("kredit_turlari"))
 async def cmd_product(message: Message, bot: Bot):
     await bot.send_message(

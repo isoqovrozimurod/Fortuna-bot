@@ -10,7 +10,7 @@ from aiogram.types import (
 router = Router()
 
 # /product komandasi uchun
-@router.message(Command("product"))
+@router.message(Command("kredit_turlari"))
 async def cmd_product(message: Message, bot: Bot):
     await bot.send_message(
         chat_id=message.chat.id,

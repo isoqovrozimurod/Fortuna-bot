@@ -97,7 +97,7 @@ async def start_kredit(msg: types.Message, state: FSMContext):
     if msg.from_user.id != ADMIN_ID:
         return await msg.answer("⛔ Sizda bu buyruqdan foydalanish huquqi yo‘q.")
 
-    await msg.answer("💰 Kredit summasini kiriting (100 000 – 1 000 000 000 so‘m):")
+    await msg.answer("💰 Kredit summasini kiriting (100 000 – 1 000 000 000) so‘m:")
     await state.set_state(KreditFSM.summa)
 
 # === Summani qabul qilish ===
@@ -111,7 +111,7 @@ async def get_sum(msg: types.Message, state: FSMContext):
         return await msg.answer("❗️100 000 – 1 000 000 000 so‘m oralig‘ida kiriting.")
 
     await state.update_data(summa=summa)
-    await msg.answer("📆 Kredit muddatini kiriting (1 – 300 oy):")
+    await msg.answer("📆 Kredit muddatini kiriting (1 – 300) oy:")
     await state.set_state(KreditFSM.month)
 
 # === Muddat qabul qilish ===

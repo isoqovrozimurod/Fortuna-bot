@@ -16,12 +16,14 @@ from ish_haqi import router as ish_haqi_router
 from garov import router as garov_router
 from calculator import router as calc_router
 from buyruqlar import set_bot_commands
+from kredit import router as kredit_admin_router  # Admin uchun
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
+
 async def main():
     if not TOKEN:
         logger.error("❌ BOT_TOKEN .env fayldan topilmadi.")
@@ -32,15 +34,15 @@ async def main():
 
     dp = Dispatcher(storage=MemoryStorage())
 
-
     # Routerlarni ro‘yxatga olish
     dp.include_router(start_router)
     dp.include_router(contact_router)
-    dp.include_router(kredit_router)
+    dp.include_router(kredit_router)          # kredit_turlari.py
     dp.include_router(pensiya_router)
     dp.include_router(ish_haqi_router)
     dp.include_router(garov_router)
     dp.include_router(calc_router)
+    dp.include_router(kredit_admin_router)    # kredit.py (faqat admin uchun)
 
     await set_bot_commands(bot)
 

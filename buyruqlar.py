@@ -8,6 +8,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="start", description="Botni ishga tushurish"),
         BotCommand(command="product", description="Kredit turlarini ko‘rish"),
         BotCommand(command="manzil", description="Bizning manzilimiz"),
+        BotCommand(command="kredit", description="Admin uchun"),
     ]
 
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())

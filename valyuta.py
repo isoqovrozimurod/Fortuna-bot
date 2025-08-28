@@ -60,7 +60,7 @@ async def valyuta_handler(msg: types.Message):
     ax.set_title(f"Banklar bo‘yicha USD kurslari ({today})", fontsize=14, fontweight='bold', pad=8)
 
     # Qo‘shimcha ogohlantirish matni
-    ax.text(0.5, 0.99, "Elatma! Bizda faqat Milliy valyuta(so'm) orqali xizmat ko‘rsatiladi!",
+    ax.text(0.5, 0.99, "⚠Eslatma! Bizda faqat Milliy valyuta(so'm) orqali xizmat ko‘rsatiladi!",
             ha='center', va='center', transform=ax.transAxes,
             fontsize=11, color='red', fontweight='bold')
 

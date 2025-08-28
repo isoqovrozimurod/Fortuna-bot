@@ -10,7 +10,7 @@ router = Router()
 
 ANIQ_URL = "https://aniq.uz/uz/valyuta-kurslari"
 
-# Kerakli banklar ro‘yxati (Poytaxt Bank olib tashlandi)
+# Kerakli banklar ro‘yxati
 TARGET_BANKS = {
     "Agrobank": "Agro Bank",
     "Mikrokreditbank": "Mikrokreditbank",

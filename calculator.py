@@ -189,9 +189,9 @@ async def result(msg: types.Message, bot: Bot, state: FSMContext):
     rate = data.get("rate", cfg["rate"])
 
     ann_png = draw_png(ann_table(summa, rate, months),
-                       f"{cfg['name']} – {months} oy | Annuitet ({rate}%)", summa)
+                       f"{cfg['name']} – {months} oy | Annuitet", summa)
     diff_png = draw_png(diff_table(summa, rate, months),
-                        f"{cfg['name']} – {months} oy | Differensial ({rate}%)", summa)
+                        f"{cfg['name']} – {months} oy | Differensial", summa)
 
     await bot.send_photo(msg.chat.id, ann_png, caption="📄 <b>Annuitet jadval</b>", parse_mode=ParseMode.HTML)
     await bot.send_photo(msg.chat.id, diff_png, caption="📄 <b>Differensial jadval</b>", parse_mode=ParseMode.HTML)

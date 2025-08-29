@@ -18,10 +18,12 @@ TARGET_BANKS = {
     "Hamkorbank": "Hamkorbank",
     "Aloqabank": "AloqaBank",
     "Trastbank": "Trastbank",
+    "Asaka bank": "Asaka Bank",
     "Turon bank": "Turon Bank",
     "Ipoteka bank": "Ipoteka Bank",
     "NBU": "NBU",
-    "Asaka bank": "Asaka Bank",
+    "SQB": "SQB",
+    "Kapitalbank": "Kapitalbank",
 }
 
 @router.message(F.text == "/valyuta")

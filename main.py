@@ -17,6 +17,7 @@ from garov import router as garov_router
 from calculator import router as calc_router
 from buyruqlar import set_bot_commands
 from valyuta import router as valyuta_router
+from vakansiya import router as vakansiya_router
 from kredit import router as kredit_admin_router  # Admin uchun
 
 logging.basicConfig(level=logging.INFO)
@@ -44,6 +45,7 @@ async def main():
     dp.include_router(garov_router)
     dp.include_router(calc_router)
     dp.include_router(valyuta_router)
+    dp.include_router(vakansiya_router)
     dp.include_router(kredit_admin_router)    # kredit.py (faqat admin uchun)
 
     await set_bot_commands(bot)

@@ -27,13 +27,25 @@ class IshFSM(StatesGroup):
 
 # === JSON saqlash/ochish funksiyalari ===
 def load_data():
+    """Vakansiyalarni JSON fayldan o‘qish"""
     if not os.path.exists(DATA_FILE):
+        save_data([])  # Fayl mavjud bo‘lmasa bo‘sh massiv yaratamiz
         return []
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            if not content:  # Fayl bo‘sh bo‘lsa
+                save_data([])
+                return []
+            return json.loads(content)
+    except (json.JSONDecodeError, ValueError):
+        # Noto‘g‘ri format bo‘lsa yangidan yaratamiz
+        save_data([])
+        return []
 
 
 def save_data(data):
+    """Vakansiyalarni JSON faylga saqlash"""
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -54,7 +66,6 @@ async def ish_handler(msg: types.Message, state: FSMContext):
 # === Admin: vakansiya qo‘shish ===
 @router.callback_query(F.data == "add_vakansiya")
 async def add_vakansiya(clb: types.CallbackQuery, state: FSMContext):
-    # Inline tugma yaratish
     skip_button = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ O'tkazib yuborish", callback_data="skip_photo")]
     ])
@@ -148,12 +159,10 @@ async def edit_vakansiya(clb: types.CallbackQuery, state: FSMContext):
     await state.update_data(edit_id=vid, current_rasm=vak["rasm"], current_matn=vak["matn"])
     await state.set_state(IshFSM.edit_rasm)
 
-    # Inline tugma yaratish
     skip_button = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ O'tkazib yuborish", callback_data="skip_edit_photo")]
     ])
 
-    # Agar rasm mavjud bo'lsa, uni ko'rsatamiz
     if vak["rasm"]:
         await clb.message.answer_photo(
             vak["rasm"],
@@ -191,7 +200,7 @@ async def edit_get_rasm(msg: types.Message, state: FSMContext):
 @router.callback_query(F.data == "skip_edit_photo")
 async def skip_edit_photo(clb: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    await state.update_data(rasm=data.get("current_rasm"))  # Eski rasmni saqlaymiz
+    await state.update_data(rasm=data.get("current_rasm"))
     await state.set_state(IshFSM.edit_matn)
     db = load_data()
     vak = next((v for v in db if v["id"] == data["edit_id"]), None)
@@ -209,7 +218,7 @@ async def skip_edit_photo(clb: types.CallbackQuery, state: FSMContext):
 @router.message(IshFSM.edit_rasm, F.text == "❌")
 async def skip_edit_rasm(msg: types.Message, state: FSMContext):
     data = await state.get_data()
-    await state.update_data(rasm=data.get("current_rasm"))  # Eski rasmni saqlaymiz
+    await state.update_data(rasm=data.get("current_rasm"))
     await state.set_state(IshFSM.edit_matn)
     db = load_data()
     vak = next((v for v in db if v["id"] == data["edit_id"]), None)
@@ -231,8 +240,8 @@ async def skip_edit_text(clb: types.CallbackQuery, state: FSMContext):
     db = load_data()
     for v in db:
         if v["id"] == vid:
-            v["rasm"] = data.get("rasm")  # Yangi yoki eski rasmni saqlaymiz
-            v["matn"] = data.get("current_matn")  # Eski matnni saqlaymiz
+            v["rasm"] = data.get("rasm")
+            v["matn"] = data.get("current_matn")
             break
     save_data(db)
     await clb.message.answer("✅ Vakansiya yangilandi.")
@@ -247,8 +256,8 @@ async def save_edit(msg: types.Message, state: FSMContext):
     db = load_data()
     for v in db:
         if v["id"] == vid:
-            v["matn"] = msg.html_text  # HTML formatni saqlaymiz
-            v["rasm"] = data.get("rasm")  # Yangi yoki eski rasmni saqlaymiz
+            v["matn"] = msg.html_text
+            v["rasm"] = data.get("rasm")
             break
     save_data(db)
     await msg.answer("✅ Vakansiya yangilandi.")

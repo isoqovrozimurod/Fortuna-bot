@@ -142,6 +142,10 @@ async def ask_sum_after_year(msg: types.Message, state: FSMContext):
 
     yil = int(yil_text)
     hozirgi_yil = datetime.now().year
+
+    if yil < 2000 or yil > hozirgi_yil:
+        return await msg.answer(f"❗️Yil 2000 va {hozirgi_yil} oralig‘ida bo‘lishi kerak.")
+
     farq = hozirgi_yil - yil
     await state.update_data(rate=(42 if farq <= 5 else 48))
 

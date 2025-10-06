@@ -29,7 +29,7 @@ CFG = {
         "name": "Ish haqi krediti", "rate": 49,
         "min": 3_000_000, "max": 40_000_000, "mmin": 12, "mmax": 36},
     "calc_auto": {
-        "name": "Avto garov krediti", "rate": 48,
+        "name": "Avto garov krediti", "rate": 54,
         "min": 3_000_000, "max": 300_000_000, "mmin": 12, "mmax": 36},
 }
 
@@ -147,7 +147,7 @@ async def ask_sum_after_year(msg: types.Message, state: FSMContext):
         return await msg.answer(f"❗️Yil 2000 va {hozirgi_yil} oralig‘ida bo‘lishi kerak.")
 
     farq = hozirgi_yil - yil
-    await state.update_data(rate=(42 if farq <= 5 else 48))
+    await state.update_data(rate = 48 if farq <= 5 else CFG["calc_auto"]["rate"])
 
     data = await state.get_data()
     cfg = CFG[data["code"]]

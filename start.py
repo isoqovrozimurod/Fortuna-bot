@@ -22,7 +22,7 @@ router = Router()
 
 # -------------------- Sozlamalar --------------------
 REQUIRED_CHANNELS: list[tuple[str, str]] = [
-    ("@FORTUNABIZNES_GALLAOROL", "📢 Kanal 1"),
+    ("@isoqovrozimurod_blog", "📢 Kanal 1"),
     ("@FB_Gallaorolfiliali", "💬 Guruh 1"),
 ]
 

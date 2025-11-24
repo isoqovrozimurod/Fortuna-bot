@@ -6,3 +6,5 @@ python-dotenv==1.0.1  # .env o‘zgaruvchilarini yuklash
 
 # Jadval rasmlari
 matplotlib==3.8.4     # Grafik/jadval chizish
+
+pydantic==2.6.1

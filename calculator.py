@@ -197,7 +197,7 @@ async def result(msg: types.Message, bot: Bot, state: FSMContext):
     diff_png = draw_png(diff_table(summa, rate, months),
                         f"{cfg['name']} – {months} oy | Differensial", summa)
 
-    await bot.send_photo(msg.chat.id, ann_png, caption="📄 <b>Annuitet jadval</b>", parse_mode=ParseMode.HTML)
-    await bot.send_photo(msg.chat.id, diff_png, caption="📄 <b>Differensial jadval</b>", parse_mode=ParseMode.HTML)
+    await bot.send_photo(msg.chat.id, ann_png, caption="📄 <b>Annuitet jadval\n@Gallaorol_FBbot</b>", parse_mode=ParseMode.HTML)
+    await bot.send_photo(msg.chat.id, diff_png, caption="📄 <b>Differensial jadval\n@Gallaorol_FBbot</b>", parse_mode=ParseMode.HTML)
     await msg.answer("⬅️ Kredit turlari", reply_markup=BACK_KB)
     await state.clear()

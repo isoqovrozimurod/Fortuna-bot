@@ -136,8 +136,13 @@ for (let xodim in xodimlar) {
     }
 }
 
-console.log(`\n🔢 Umumiy kreditlar soni: ${umumiyHisob} ta`);
-console.log(`📊 Umumiy kredit summasi: ${umumiyJami.toLocaleString('fr-FR')} so'm`);
+console.log(
+  `\n🔢 Umumiy kreditlar soni: ${(umumiyHisob - holatStat.bekor.soni)} ta`
+);
+
+console.log(
+  `📊 Umumiy kredit summasi: ${(umumiyJami - holatStat.bekor.summa).toLocaleString('fr-FR')} so'm`
+);
 
 // 🔥 Holatlar bo‘yicha umumiy statistika
 console.log(`\n📌 Kredit holatlari statistikasi:`);

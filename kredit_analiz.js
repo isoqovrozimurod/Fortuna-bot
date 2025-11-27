@@ -51,8 +51,11 @@ summalar.forEach(td => {
 
     // 11-ustundagi holatni tekshirish
     let holatTd = qator.querySelector('td:nth-child(11)');
-    let holat = holatTd ? holatTd.innerText.trim().toLowerCase() : null;
-    if (holat !== 'berilgan') return;
+let holat = holatTd ? holatTd.innerText.trim().toLowerCase() : null;
+
+const valid = ['berilgan', 'yopilgan', 'выдано', 'закрыта'];
+
+if (!valid.includes(holat)) return;
 
     let kreditTuri = qator.querySelector('td:nth-child(7)').innerText.trim();
     let xodim = qator.querySelector('td:nth-child(8)').innerText.trim();

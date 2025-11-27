@@ -38,29 +38,63 @@ let kreditTurlarSet = new Set(
 );
 let kreditTurlar = Array.from(kreditTurlarSet);
 
-// 3. Kredit summalarini topish (".00" bilan tugaydigan raqamlar)
+// 3. Kredit summalarini topish
 let summalar = Array.from(document.querySelectorAll('td'))
     .filter(td => td.innerText.includes(",00") && !isNaN(parseFloat(td.innerText.replace(/\s/g, "").replace(",", "."))));
 
-// 4. Xodimlar bo‘yicha ma'lumotlarni yig‘ish (faqat 11-ustunda "berilgan" bo‘lsa)
+// ------------------------------
+//   🔥 4. Holatlar statistikasi
+// ------------------------------
+let holatStat = {
+    berilgan: { soni: 0, summa: 0 },
+    yopilgan: { soni: 0, summa: 0 },
+    bekor: { soni: 0, summa: 0 }
+};
+
+// 4. Xodimlar bo‘yicha yig‘ish
 let xodimlar = {};
 
 summalar.forEach(td => {
     let qator = td.closest('tr');
     if (!qator) return;
 
-    // 11-ustundagi holatni tekshirish
+    // Holat
     let holatTd = qator.querySelector('td:nth-child(11)');
-let holat = holatTd ? holatTd.innerText.trim().toLowerCase() : null;
+    let holatRaw = holatTd ? holatTd.innerText.trim().toLowerCase() : null;
 
-const valid = ['berilgan', 'yopilgan', 'выдано', 'закрыта'];
+    // Rus → O‘zbek tarjima
+    let tarjima = {
+        "выдано": "berilgan",
+        "закрыта": "yopilgan",
+        "отменена": "bekor qilingan"
+    };
 
-if (!valid.includes(holat)) return;
+    let holat = tarjima[holatRaw] || holatRaw;
+
+    const valid = ['berilgan', 'yopilgan', 'bekor qilingan'];
+
+    // Agar notog‘ri holat bo‘lsa — o‘tib ketamiz
+    if (!valid.includes(holat)) return;
 
     let kreditTuri = qator.querySelector('td:nth-child(7)').innerText.trim();
     let xodim = qator.querySelector('td:nth-child(8)').innerText.trim();
     let summa = parseFloat(td.innerText.replace(/\s/g, "").replace(",", "."));
 
+    // ------------------------------
+    //   🔥 Holatlar umumiy statistikasi
+    // ------------------------------
+    if (holat === "berilgan") {
+        holatStat.berilgan.soni++;
+        holatStat.berilgan.summa += summa;
+    } else if (holat === "yopilgan") {
+        holatStat.yopilgan.soni++;
+        holatStat.yopilgan.summa += summa;
+    } else if (holat === "bekor qilingan") {
+        holatStat.bekor.soni++;
+        holatStat.bekor.summa += summa;
+    }
+
+    // Xodimlar bo'yicha
     if (!xodimlar[xodim]) {
         xodimlar[xodim] = {
             jamiSumma: 0,
@@ -68,18 +102,15 @@ if (!valid.includes(holat)) return;
             turlar: {}
         };
         kreditTurlar.forEach(tur => {
-            xodimlar[xodim].turlar[tur] = {
-                soni: 0,
-                summa: 0
-            };
+            xodimlar[xodim].turlar[tur] = { soni: 0, summa: 0 };
         });
     }
 
     xodimlar[xodim].jamiSumma += summa;
-    xodimlar[xodim].jamiHisob += 1;
+    xodimlar[xodim].jamiHisob++;
 
     if (xodimlar[xodim].turlar[kreditTuri]) {
-        xodimlar[xodim].turlar[kreditTuri].soni += 1;
+        xodimlar[xodim].turlar[kreditTuri].soni++;
         xodimlar[xodim].turlar[kreditTuri].summa += summa;
     }
 });
@@ -88,7 +119,7 @@ if (!valid.includes(holat)) return;
 let umumiyJami = Object.values(xodimlar).reduce((a, b) => a + b.jamiSumma, 0);
 let umumiyHisob = Object.values(xodimlar).reduce((a, b) => a + b.jamiHisob, 0);
 
-// 6. Natijalarni chiqarish
+// 6. Natijalar
 console.log(`\n📅 Kreditlar davri: ${formatDate(boshSana)} - ${formatDate(oxirgiSana)}\n`);
 
 for (let xodim in xodimlar) {
@@ -109,24 +140,11 @@ for (let xodim in xodimlar) {
 console.log(`\n🔢 Umumiy kreditlar soni: ${umumiyHisob} ta`);
 console.log(`📊 Umumiy kredit summasi: ${umumiyJami.toLocaleString('fr-FR')} so'm`);
 
-// 7. Kredit turlari bo‘yicha umumiy statistikasi
-let kreditTurlarStat = {};
-kreditTurlar.forEach(tur => {
-    kreditTurlarStat[tur] = { summa: 0, soni: 0 };
-});
+// ------------------------------
+//   🔥 7. Holatlar statistikasi
+// ------------------------------
+console.log(`\n📌 Kredit holatlari statistikasi:`);
 
-for (let xodim in xodimlar) {
-    let info = xodimlar[xodim].turlar;
-    for (let tur in info) {
-        kreditTurlarStat[tur].summa += info[tur].summa;
-        kreditTurlarStat[tur].soni += info[tur].soni;
-    }
-}
-
-console.log(`\n📌 Kredit turlari bo‘yicha umumiy statistikasi:`);
-for (let tur in kreditTurlarStat) {
-    let { summa, soni } = kreditTurlarStat[tur];
-    if (soni > 0) {
-        console.log(`  - ${tur}: ${soni} ta, summa: ${summa.toLocaleString('fr-FR')} so'm`);
-    }
-}
+console.log(`  ✔️ Berilgan: ${holatStat.berilgan.soni} ta, summa: ${holatStat.berilgan.summa.toLocaleString('fr-FR')} so'm`);
+console.log(`  🔒 Yopilgan: ${holatStat.yopilgan.soni} ta, summa: ${holatStat.yopilgan.summa.toLocaleString('fr-FR')} so'm`);
+console.log(`  ❌ Bekor qilingan: ${holatStat.bekor.soni} ta, summa: ${holatStat.bekor.summa.toLocaleString('fr-FR')} so'm`);

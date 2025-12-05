@@ -19,6 +19,7 @@ from buyruqlar import set_bot_commands
 from valyuta import router as valyuta_router
 from vakansiya import router as vakansiya_router
 from kredit import router as kredit_admin_router  # Admin uchun
+from keep_alive import keep_alive
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 
 async def main():
+    keep_alive() 
     if not TOKEN:
         logger.error("❌ BOT_TOKEN .env fayldan topilmadi.")
         return

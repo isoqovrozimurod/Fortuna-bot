@@ -23,7 +23,7 @@ Quyidagi havola orqali JavaScript faylga kirishingiz mumkin:
 
 ```js
 (async () => {
-  const url = 'https://raw.githubusercontent.com/isoqovrozimurod/Fortuna-bot/main/kredit_analiz.js';
+  const url = 'https://raw.githubusercontent.com/isoqovrozimurod/Fortuna-bot/main/konveyer/kredit_analiz.js';
 
   try {
     console.log('⏳ GitHub fayli yuklanmoqda…');

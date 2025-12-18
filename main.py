@@ -18,6 +18,7 @@ from calculator import router as calc_router
 from buyruqlar import set_bot_commands
 from valyuta import router as valyuta_router
 from vakansiya import router as vakansiya_router
+from biznes import router as biznes_router
 from kredit import router as kredit_admin_router  # Admin uchun
 from keep_alive import keep_alive
 
@@ -45,6 +46,7 @@ async def main():
     dp.include_router(pensiya_router)
     dp.include_router(ish_haqi_router)
     dp.include_router(garov_router)
+    dp.include_router(biznes_router)
     dp.include_router(calc_router)
     dp.include_router(valyuta_router)
     dp.include_router(vakansiya_router)

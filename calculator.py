@@ -31,6 +31,10 @@ CFG = {
     "calc_auto": {
         "name": "Avto garov krediti", "rate": 54,
         "min": 3_000_000, "max": 300_000_000, "mmin": 12, "mmax": 36},
+    "calc_biznes": {
+        "name": "Biznes uchun mikroqarz", "rate": 54,
+        "min": 10_000_000, "max": 50_000_000, "mmin": 12, "mmax": 24,
+    },
 }
 
 BACK_KB = InlineKeyboardMarkup(

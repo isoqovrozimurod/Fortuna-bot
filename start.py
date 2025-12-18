@@ -44,13 +44,13 @@ def promo_caption() -> str:
         "🌐 FORTUNA BIZNES mikromoliya tashkiloti G'ALLAOROL filiali har doim sizga yordam berishga tayyor\n"
         "🗄Naqt pul ko'rinishidagi mikroqarzlar\n"
         "💎\"Fortuna Biznes\" mikromoliya tashkiloti G'ALLAOROL filiali bilan moliyaviy muammolaringizni tez va oson xal qiling\n\n"
-        "📍Manzil: G'allaorol tumani, G'.G'ulom MFY Mustaqillik ko'chasi 28-uy\n"
-        "🔎Mo'ljal: 1-son sport maktabi yonida\n"
         "📞+998551510040\n"
         "📞+998992510040\n"
         "📞+998724321500\n"
         "📞+998953754540\n"
-        "@Gallaorol_FB"
+        "@Gallaorol_FB\n\n"
+        "📍Manzil: G'allaorol tumani, G'.G'ulom MFY Mustaqillik ko'chasi 28-uy\n"
+        "🔎Mo'ljal: 1-son Sport maktabi yonida\n"
     )
 
 

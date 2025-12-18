@@ -8,7 +8,7 @@ Agar siz sahifadagi jadval ma'lumotlari asosida **kreditlar statistik tahlilini*
 
 Quyidagi havola orqali JavaScript faylga kirishingiz mumkin:
 
-🔗 [`kredit_analiz.js`](https://raw.githubusercontent.com/isoqovrozimurod/Fortuna-bot/main/kredit_analiz.js) (RAW format)
+🔗 [`kredit_analiz.js`](https://raw.githubusercontent.com/isoqovrozimurod/Fortuna-bot/main/konveyer/kredit_analiz.js) (RAW format)
 
 ---
 

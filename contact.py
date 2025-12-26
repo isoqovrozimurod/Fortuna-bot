@@ -15,12 +15,13 @@ LONGITUDE = 67.589176
 
 # Kontakt matni
 CONTACT_TEXT = (
+    "Ish vaqti dushanbadan jumagacha 09:00 dan 18:00 gacha\n"
     "📍Manzil: G'allaorol tumani, G'.G'ulom MFY Mustaqillik ko'chasi 28-uy\n"
-    "🔎Mo'ljal: 1-son sport maktabi yonida\n"
-    "📞+998551510040\n"
-    "📞+998992510040\n"
-    "📞+998724321500\n"
-    "📞+998953754540\n"
+    "🔎Mo'ljal: 1-son Sport maktabi yonida\n"
+    "☎️+998551510040\n"
+    "📞+998992510040      24/7⏳\n"
+    "☎️+998724321500\n"
+    "📞+998953754540      24/7⏳\n"
     "@Gallaorol_FB"
 )
 

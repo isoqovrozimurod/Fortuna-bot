@@ -28,7 +28,7 @@ async def cmd_product(message: Message, bot: Bot):
         chat_id=message.chat.id,
         text=(
             "💸 <b>Kreditni quyidagi shaxslar olishlari mumkin:</b>\n\n"
-            "✅ Nafaqadagilar\n"
+            "✅ Pensionerlar\n"
             "💼 Rasmiy daromadga ega shaxslar\n"
             "🚗 Avtomashina egalari\n"
             "🏢 Biznes egalari"
@@ -45,7 +45,7 @@ async def show_credit_types(callback: CallbackQuery, bot: Bot):
         chat_id=callback.from_user.id,
         text=(
             "💸 <b>Kreditni quyidagi shaxslar olishlari mumkin:</b>\n\n"
-            "✅ Nafaqadagilar\n"
+            "✅ Pensionerlar\n"
             "💼 Rasmiy daromadga ega shaxslar\n"
             "🚗 Avtomashina egalari\n"
             "🏢 Biznes egalari"

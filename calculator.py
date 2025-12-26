@@ -24,7 +24,7 @@ class CalcFSM(StatesGroup):
 CFG = {
     "calc_pension": {
         "name": "Pensiya krediti", "rate": 49,
-        "min": 3_000_000, "max": 20_000_000, "mmin": 12, "mmax": 18},
+        "min": 3_000_000, "max": 30_000_000, "mmin": 12, "mmax": 24},
     "calc_salary": {
         "name": "Ish haqi krediti", "rate": 49,
         "min": 3_000_000, "max": 40_000_000, "mmin": 12, "mmax": 36},

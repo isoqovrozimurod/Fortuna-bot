@@ -13,28 +13,28 @@ LINK_REGEX = re.compile(
 
 @router.message(F.chat.type.in_({"group", "supergroup"}))
 async def delete_links_from_non_admins(message: Message, bot: Bot):
-    # Agar xabarda matn bo‘lmasa — chiqib ketamiz
+    # Matn bo‘lmasa – chiqib ketamiz
     if not message.text:
         return
 
-    # Agar link bo‘lmasa — tegmaymiz
+    # Link bo‘lmasa – tegmaymiz
     if not LINK_REGEX.search(message.text):
         return
 
-    # Xabar yuboruvchining statusini tekshiramiz
+    # Foydalanuvchi statusini tekshiramiz
     member = await bot.get_chat_member(
         chat_id=message.chat.id,
         user_id=message.from_user.id
     )
 
-    # Agar admin yoki creator bo‘lsa — ruxsat
+    # Agar creator yoki admin bo‘lsa – ruxsat
     if member.status in (
         ChatMemberStatus.ADMINISTRATOR,
-        ChatMemberStatus.OWNER
+        ChatMemberStatus.CREATOR
     ):
         return
 
-    # Aks holda — linkni o‘chiramiz
+    # Aks holda – xabarni o‘chiramiz
     try:
         await message.delete()
     except Exception:

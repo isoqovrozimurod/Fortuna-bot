@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import os
 import json
+import re
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
@@ -12,13 +15,39 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 router = Router()
 
+# 🔒 Doimiy majburiy kanal
+PERMANENT_CHANNEL = "@isoqovrozimurod_blog"
+
 CHANNEL_FILE = "channels.json"
 
 
+# =================== NORMALIZE ===================
+
+def normalize_channel(text: str) -> str | None:
+    text = text.strip()
+
+    # https://t.me/kanal yoki t.me/kanal
+    m = re.search(r"(?:https?://)?t\.me/([A-Za-z0-9_]+)", text)
+    if m:
+        return "@" + m.group(1)
+
+    # @kanal
+    if text.startswith("@"):
+        return text
+
+    # -100xxxxxxxxxx
+    if text.startswith("-100"):
+        return text
+
+    return None
+
+
 # ================= FILE =================
+
 def load_channels():
     if not os.path.exists(CHANNEL_FILE):
         return []
+
     try:
         with open(CHANNEL_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -31,7 +60,13 @@ def save_channels(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+def get_all_channels():
+    data = load_channels()
+    return [PERMANENT_CHANNEL] + data
+
+
 # ================= ADMIN PANEL =================
+
 @router.message(Command("chanel"))
 async def chanel_panel(msg: Message):
     if msg.from_user.id != ADMIN_ID:
@@ -42,20 +77,38 @@ async def chanel_panel(msg: Message):
         [InlineKeyboardButton(text="📋 Ro‘yxat", callback_data="list_ch")]
     ])
 
-    await msg.answer("📡 Majburiy obuna kanallari:", reply_markup=kb)
+    await msg.answer(
+        f"📡 Majburiy obuna tizimi\n\n"
+        f"🔒 Doimiy kanal: {PERMANENT_CHANNEL}",
+        reply_markup=kb
+    )
 
 
 @router.callback_query(F.data == "add_ch")
 async def add_ch(cb: CallbackQuery):
-    await cb.message.answer("➕ Kanal username yoki ID yuboring (masalan: @kanal yoki -100xxxx):")
+    if cb.from_user.id != ADMIN_ID:
+        return
+    await cb.message.answer(
+        "➕ Kanal yuboring:\n"
+        "@kanal\n"
+        "t.me/kanal\n"
+        "https://t.me/kanal\n"
+        "-100xxxxxxxxxx"
+    )
 
 
-@router.message(F.text.startswith("@") | F.text.startswith("-100"))
+@router.message()
 async def save_channel(msg: Message):
     if msg.from_user.id != ADMIN_ID:
         return
 
-    ch = msg.text.strip()
+    ch = normalize_channel(msg.text)
+    if not ch:
+        return
+
+    if ch == PERMANENT_CHANNEL:
+        return await msg.answer("🔒 Bu kanal doimiy majburiy, o‘chirilmaydi")
+
     data = load_channels()
 
     if ch in data:
@@ -64,14 +117,20 @@ async def save_channel(msg: Message):
     data.append(ch)
     save_channels(data)
 
-    await msg.answer("✅ Kanal qo‘shildi")
+    await msg.answer(f"✅ Qo‘shildi: {ch}")
 
 
 @router.callback_query(F.data == "list_ch")
 async def list_channels(cb: CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return
+
     data = load_channels()
+
     if not data:
-        return await cb.message.answer("❌ Kanal yo‘q")
+        return await cb.message.answer("Faqat doimiy kanal mavjud:\n" + PERMANENT_CHANNEL)
+
+    await cb.message.answer("🔒 Doimiy kanal:\n" + PERMANENT_CHANNEL)
 
     for ch in data:
         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -82,20 +141,38 @@ async def list_channels(cb: CallbackQuery):
 
 @router.callback_query(F.data.startswith("delch_"))
 async def delete_ch(cb: CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return
+
     ch = cb.data.replace("delch_", "")
     data = load_channels()
-    data = [x for x in data if x != ch]
-    save_channels(data)
-    await cb.message.answer("🗑 Kanal o‘chirildi")
+
+    if ch in data:
+        data.remove(ch)
+        save_channels(data)
+        await cb.message.answer(f"🗑 O‘chirildi: {ch}")
+    else:
+        await cb.message.answer("Topilmadi")
 
 
-# ================= SUBSCRIPTION CHECK =================
-@router.callback_query(F.data == "check_sub")
-async def check_sub(cb: CallbackQuery):
-    await cb.answer("Tekshirildi", show_alert=False)
+# ================= UI =================
+
+def subscription_keyboard(channels):
+    buttons = []
+
+    for ch in channels:
+        if ch.startswith("@"):
+            url = f"https://t.me/{ch[1:]}"
+        else:
+            url = f"https://t.me/c/{str(ch)[4:]}"
+        buttons.append([InlineKeyboardButton(text=f"🔔 {ch}", url=url)])
+
+    buttons.append([InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_sub")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 # ================= GLOBAL MIDDLEWARE =================
+
 class SubscriptionMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         bot = data["bot"]
@@ -106,6 +183,7 @@ class SubscriptionMiddleware(BaseMiddleware):
         user = event.from_user
         chat = event.chat if isinstance(event, Message) else event.message.chat
 
+        # Faqat private chat
         if chat.type != "private":
             return await handler(event, data)
 
@@ -113,10 +191,7 @@ class SubscriptionMiddleware(BaseMiddleware):
         if text.startswith("/start") or text.startswith("/chanel"):
             return await handler(event, data)
 
-        channels = load_channels()
-        if not channels:
-            return await handler(event, data)
-
+        channels = get_all_channels()
         not_joined = []
 
         for ch in channels:
@@ -125,24 +200,21 @@ class SubscriptionMiddleware(BaseMiddleware):
                 if member.status in ("left", "kicked"):
                     not_joined.append(ch)
             except TelegramBadRequest:
-                continue
+                not_joined.append(ch)
 
         if not not_joined:
             return await handler(event, data)
 
-        buttons = []
-        for ch in not_joined:
-            link = f"https://t.me/{ch[1:]}" if ch.startswith("@") else f"https://t.me/c/{str(ch)[4:]}"
-            buttons.append([InlineKeyboardButton(text="🔔 Obuna bo‘lish", url=link)])
-
-        buttons.append([InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_sub")])
-
-        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-
         await bot.send_message(
             user.id,
             "❗ Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling:",
-            reply_markup=kb
+            reply_markup=subscription_keyboard(not_joined)
         )
+        return
 
-        return  # boshqa routerlarni BLOKLAYDI
+
+# ================= CHECK =================
+
+@router.callback_query(F.data == "check_sub")
+async def check_sub(cb: CallbackQuery):
+    await cb.answer("🔄 Tekshirildi", show_alert=False)

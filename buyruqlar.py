@@ -21,6 +21,7 @@ async def set_bot_commands(bot: Bot):
     admin_commands = [
         BotCommand(command="kredit", description="Credit calculator"),
         BotCommand(command="job", description="vakansiya qo'shish"),
+        BotCommand(command="chanel", description="majburiy obuna qo'shish"),
     ]
 
     # Barcha komandalar (umumiy + admin) admin chatida ko'rinishi uchun

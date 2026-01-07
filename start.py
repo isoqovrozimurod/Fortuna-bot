@@ -29,7 +29,7 @@ def main_menu_markup():
 
 def promo_caption():
     return (
-        "<b>✅FORTUNA BIZNES ENDI G'ALLAOROLDA<b>\n\n"
+        "<b>✅FORTUNA BIZNES ENDI G'ALLAOROLDA</b>\n\n"
         "💸SIZGA PUL KERAKMI? MUAMMOSIZ, 2 SOATDA NAQD PULDA KREDIT OLING\n\n"
         "🌐 FORTUNA BIZNES mikromoliya tashkiloti G'ALLAOROL filiali har doim sizga yordam berishga tayyor\n"
         "🗄Naqt pul ko'rinishidagi mikroqarzlar\n"
@@ -41,7 +41,7 @@ def promo_caption():
         "@Gallaorol_FB\n\n"
         "Ish vaqti dushanbadan jumagacha 09:00 dan 18:00 gacha\n"
         "📍Manzil: G'allaorol tumani, G'.G'ulom MFY Mustaqillik ko'chasi 28-uy\n"
-        "🔎Mo'ljal: 1-son Sport maktabi yonida\n"
+        "🔎Mo'ljal: 1-Son Sport maktabi yonida\n"
     )
 
 

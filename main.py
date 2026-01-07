@@ -20,6 +20,8 @@ from valyuta import router as valyuta_router
 from vakansiya import router as vakansiya_router
 from biznes import router as biznes_router
 from control import router as control_router
+from chanel import router as chanel_router
+from chanel import SubscriptionMiddleware
 from kredit import router as kredit_admin_router  # Admin uchun
 from keep_alive import keep_alive
 
@@ -53,6 +55,10 @@ async def main():
     dp.include_router(vakansiya_router)
     dp.include_router(control_router)
     dp.include_router(kredit_admin_router)    # kredit.py (faqat admin uchun)
+    dp.include_router(chanel_router)
+    
+    dp.message.middleware(SubscriptionMiddleware())
+    dp.callback_query.middleware(SubscriptionMiddleware())
 
     await set_bot_commands(bot)
 

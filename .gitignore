@@ -1,0 +1,7 @@
+.env
+channels.json
+vakansiyalar.json
+__pycache__/
+*.pyc
+.idea/
+.vscode/

@@ -59,13 +59,19 @@ def main_menu_markup():
 
 def promo_caption():
     return (
-        "<b>FORTUNA BIZNES — G‘ALLAOROL FILIALI</b>\n\n"
-        "💸 Sizga qulay, tez va ishonchli kreditlar\n"
-        "📊 Kreditni oldindan hisoblab ko‘rish imkoniyati\n\n"
-        "📍 G‘allaorol tumani, Mustaqillik ko‘chasi 28-uy\n"
-        "📞 +998 55 151 00 40\n"
-        "📞 +998 99 251 00 40\n\n"
-        "👉 Kreditni hisoblab ko‘ring, so‘ng qaror qiling"
+         "<b>✅FORTUNA BIZNES ENDI G'ALLAOROLDA<b>\n\n"
+        "💸SIZGA PUL KERAKMI? MUAMMOSIZ, 2 SOATDA NAQD PULDA KREDIT OLING\n\n"
+        "🌐 FORTUNA BIZNES mikromoliya tashkiloti G'ALLAOROL filiali har doim sizga yordam berishga tayyor\n"
+        "🗄Naqt pul ko'rinishidagi mikroqarzlar\n"
+        "💎\"Fortuna Biznes\" mikromoliya tashkiloti G'ALLAOROL filiali bilan moliyaviy muammolaringizni tez va oson xal qiling\n\n"
+        "☎️+998551510040\n"
+        "📱+998992510040      24/7⏳\n"
+        "☎️+998724321500\n"
+        "📱+998953754540      24/7⏳\n"
+        "@Gallaorol_FB\n\n"
+        "Ish vaqti dushanbadan jumagacha 09:00 dan 18:00 gacha\n"
+        "📍Manzil: G'allaorol tumani, G'.G'ulom MFY Mustaqillik ko'chasi 28-uy\n"
+        "🔎Mo'ljal: 1-son Sport maktabi yonida\n"
     )
 
 

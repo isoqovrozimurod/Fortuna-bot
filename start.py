@@ -1,55 +1,20 @@
 from __future__ import annotations
 
-import json
-import os
 import contextlib
 from pathlib import Path
 
 from aiogram import Router, Bot, types, F
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
 router = Router()
 
-CHANNEL_FILE = "channels.json"
 TEMP_DIR = Path(__file__).resolve().parent / "temp"
 PROMO_IMAGE = TEMP_DIR / "fortuna.jpg"
 
 
-# ================= FILE =================
-
-def load_channels():
-    if not os.path.exists(CHANNEL_FILE):
-        return []
-    try:
-        with open(CHANNEL_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return []
-
-
 # ================= UI =================
-
-def subscription_markup(channels):
-    buttons = []
-
-    for ch in channels:
-        if ch.startswith("@"):
-            url = f"https://t.me/{ch[1:]}"
-            name = ch
-        else:
-            # -100xxxxxxxxxx formatdagi private channel/guruh
-            cid = str(ch).replace("-100", "")
-            url = f"https://t.me/c/{cid}"
-            name = ch
-
-        buttons.append([InlineKeyboardButton(text=f"🔔 {name}", url=url)])
-
-    buttons.append([InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_sub")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
 
 def main_menu_markup():
     return InlineKeyboardMarkup(
@@ -80,24 +45,6 @@ def promo_caption():
     )
 
 
-# ================= CHECK =================
-
-async def is_user_subscribed(bot: Bot, user_id: int) -> bool:
-    channels = load_channels()
-    if not channels:
-        return True
-
-    for ch in channels:
-        try:
-            member = await bot.get_chat_member(ch, user_id)
-            if member.status in ("left", "kicked"):
-                return False
-        except TelegramBadRequest:
-            return False
-
-    return True
-
-
 # ================= PROMO =================
 
 async def send_promo(bot: Bot, user_id: int):
@@ -122,41 +69,10 @@ async def send_promo(bot: Bot, user_id: int):
 
 @router.message(Command("start"))
 async def cmd_start(message: types.Message, bot: Bot):
-    user_id = message.from_user.id
-    channels = load_channels()
-
-    if channels and not await is_user_subscribed(bot, user_id):
-        await message.answer(
-            "❗ Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling:",
-            reply_markup=subscription_markup(channels)
-        )
-        return
-
-    await send_promo(bot, user_id)
+    await send_promo(bot, message.from_user.id)
 
 
-# ================= CHECK BUTTON =================
-
-@router.callback_query(F.data == "check_sub")
-async def check_subscription(callback: types.CallbackQuery, bot: Bot):
-    user_id = callback.from_user.id
-    channels = load_channels()
-
-    if await is_user_subscribed(bot, user_id):
-        with contextlib.suppress(Exception):
-            await callback.message.delete()
-        await send_promo(bot, user_id)
-    else:
-        with contextlib.suppress(Exception):
-            await callback.message.delete()
-        await bot.send_message(
-            user_id,
-            "❗ Avval kanallarga obuna bo‘ling:",
-            reply_markup=subscription_markup(channels)
-        )
-
-
-# ================= ORTGA =================
+# ================= Ortga =================
 
 @router.callback_query(F.data == "back_to_menu")
 async def back_to_menu(callback: types.CallbackQuery, bot: Bot):

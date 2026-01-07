@@ -38,9 +38,14 @@ def subscription_markup(channels):
     for ch in channels:
         if ch.startswith("@"):
             url = f"https://t.me/{ch[1:]}"
+            name = ch
         else:
-            url = f"https://t.me/c/{str(ch)[4:]}"
-        buttons.append([InlineKeyboardButton(text=f"🔔 {ch}", url=url)])
+            # -100xxxxxxxxxx formatdagi private channel/guruh
+            cid = str(ch).replace("-100", "")
+            url = f"https://t.me/c/{cid}"
+            name = ch
+
+        buttons.append([InlineKeyboardButton(text=f"🔔 {name}", url=url)])
 
     buttons.append([InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_sub")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -59,7 +64,7 @@ def main_menu_markup():
 
 def promo_caption():
     return (
-         "<b>✅FORTUNA BIZNES ENDI G'ALLAOROLDA<b>\n\n"
+        "<b>✅FORTUNA BIZNES ENDI G'ALLAOROLDA<b>\n\n"
         "💸SIZGA PUL KERAKMI? MUAMMOSIZ, 2 SOATDA NAQD PULDA KREDIT OLING\n\n"
         "🌐 FORTUNA BIZNES mikromoliya tashkiloti G'ALLAOROL filiali har doim sizga yordam berishga tayyor\n"
         "🗄Naqt pul ko'rinishidagi mikroqarzlar\n"

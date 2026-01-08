@@ -24,6 +24,7 @@ CHANNEL_FILE = "channels.json"
 # =================== NORMALIZE ===================
 
 def normalize_channel(text: str) -> str | None:
+    """Kanal formatini normalizatsiya qilish"""
     text = text.strip()
 
     # https://t.me/kanal yoki t.me/kanal
@@ -45,6 +46,7 @@ def normalize_channel(text: str) -> str | None:
 # ================= FILE =================
 
 def load_channels():
+    """Kanallar ro'yxatini yuklash"""
     if not os.path.exists(CHANNEL_FILE):
         return []
 
@@ -56,11 +58,13 @@ def load_channels():
 
 
 def save_channels(data):
+    """Kanallar ro'yxatini saqlash"""
     with open(CHANNEL_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def get_all_channels():
+    """Barcha kanallarni olish (doimiy + qo'shimcha)"""
     data = load_channels()
     return [PERMANENT_CHANNEL] + data
 
@@ -69,12 +73,13 @@ def get_all_channels():
 
 @router.message(Command("chanel"))
 async def chanel_panel(msg: Message):
+    """Admin panel"""
     if msg.from_user.id != ADMIN_ID:
         return await msg.answer("⛔ Siz admin emassiz")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Kanal qo‘shish", callback_data="add_ch")],
-        [InlineKeyboardButton(text="📋 Ro‘yxat", callback_data="list_ch")]
+        [InlineKeyboardButton(text="➕ Kanal qo'shish", callback_data="add_ch")],
+        [InlineKeyboardButton(text="📋 Ro'yxat", callback_data="list_ch")]
     ])
 
     await msg.answer(
@@ -86,6 +91,7 @@ async def chanel_panel(msg: Message):
 
 @router.callback_query(F.data == "add_ch")
 async def add_ch(cb: CallbackQuery):
+    """Kanal qo'shish ko'rsatmasi"""
     if cb.from_user.id != ADMIN_ID:
         return
     await cb.message.answer(
@@ -97,17 +103,18 @@ async def add_ch(cb: CallbackQuery):
     )
 
 
-@router.message()
+@router.message(F.text.startswith(("@", "t.me", "https://t.me", "-100")))
 async def save_channel(msg: Message):
+    """Kanalni saqlash"""
     if msg.from_user.id != ADMIN_ID:
         return
 
     ch = normalize_channel(msg.text)
     if not ch:
-        return
+        return await msg.answer("❌ Noto'g'ri format")
 
     if ch == PERMANENT_CHANNEL:
-        return await msg.answer("🔒 Bu kanal doimiy majburiy, o‘chirilmaydi")
+        return await msg.answer("🔒 Bu kanal doimiy majburiy, o'chirilmaydi")
 
     data = load_channels()
 
@@ -117,11 +124,12 @@ async def save_channel(msg: Message):
     data.append(ch)
     save_channels(data)
 
-    await msg.answer(f"✅ Qo‘shildi: {ch}")
+    await msg.answer(f"✅ Qo'shildi: {ch}")
 
 
 @router.callback_query(F.data == "list_ch")
 async def list_channels(cb: CallbackQuery):
+    """Kanallar ro'yxati"""
     if cb.from_user.id != ADMIN_ID:
         return
 
@@ -134,13 +142,14 @@ async def list_channels(cb: CallbackQuery):
 
     for ch in data:
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🗑 O‘chirish", callback_data=f"delch_{ch}")]
+            [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"delch_{ch}")]
         ])
         await cb.message.answer(f"🔗 {ch}", reply_markup=kb)
 
 
 @router.callback_query(F.data.startswith("delch_"))
 async def delete_ch(cb: CallbackQuery):
+    """Kanalni o'chirish"""
     if cb.from_user.id != ADMIN_ID:
         return
 
@@ -150,7 +159,7 @@ async def delete_ch(cb: CallbackQuery):
     if ch in data:
         data.remove(ch)
         save_channels(data)
-        await cb.message.answer(f"🗑 O‘chirildi: {ch}")
+        await cb.message.answer(f"🗑 O'chirildi: {ch}")
     else:
         await cb.message.answer("Topilmadi")
 
@@ -158,6 +167,7 @@ async def delete_ch(cb: CallbackQuery):
 # ================= UI =================
 
 def subscription_keyboard(channels):
+    """Obuna bo'lish tugmalari"""
     buttons = []
 
     for ch in channels:
@@ -174,6 +184,8 @@ def subscription_keyboard(channels):
 # ================= GLOBAL MIDDLEWARE =================
 
 class SubscriptionMiddleware(BaseMiddleware):
+    """Majburiy obuna middleware"""
+    
     async def __call__(self, handler, event, data):
         bot = data["bot"]
 
@@ -181,14 +193,20 @@ class SubscriptionMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         user = event.from_user
+        
+        # Admin uchun bypass
+        if user.id == ADMIN_ID:
+            return await handler(event, data)
+        
         chat = event.chat if isinstance(event, Message) else event.message.chat
 
         # Faqat private chat
         if chat.type != "private":
             return await handler(event, data)
 
+        # /start buyrug'i uchun bypass
         text = event.text if isinstance(event, Message) else ""
-        if text.startswith("/start") or text.startswith("/chanel"):
+        if text.startswith("/start"):
             return await handler(event, data)
 
         channels = get_all_channels()
@@ -201,13 +219,17 @@ class SubscriptionMiddleware(BaseMiddleware):
                     not_joined.append(ch)
             except TelegramBadRequest:
                 not_joined.append(ch)
+            except Exception as e:
+                print(f"❌ Kanal tekshirish xatosi {ch}: {e}")
+                continue
 
         if not not_joined:
             return await handler(event, data)
 
+        # Obuna bo'lmagan foydalanuvchiga xabar
         await bot.send_message(
             user.id,
-            "❗ Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling:",
+            "❗ Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:",
             reply_markup=subscription_keyboard(not_joined)
         )
         return
@@ -217,4 +239,6 @@ class SubscriptionMiddleware(BaseMiddleware):
 
 @router.callback_query(F.data == "check_sub")
 async def check_sub(cb: CallbackQuery):
-    await cb.answer("🔄 Tekshirildi", show_alert=False)
+    """Obunani qayta tekshirish"""
+    await cb.answer("🔄 Tekshirilmoqda...", show_alert=False)
+    # Middleware avtomatik tekshiradi

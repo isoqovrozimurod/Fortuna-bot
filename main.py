@@ -22,30 +22,43 @@ from biznes import router as biznes_router
 from control import router as control_router
 from chanel import router as chanel_router
 from chanel import SubscriptionMiddleware
-from kredit import router as kredit_admin_router  # Admin uchun
+from kredit import router as kredit_admin_router
 from keep_alive import keep_alive
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 
 async def main():
-    keep_alive() 
+    """Asosiy bot funksiyasi"""
+    
+    # Token tekshirish
     if not TOKEN:
         logger.error("❌ BOT_TOKEN .env fayldan topilmadi.")
         return
 
-    bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    # Bot obyekti
+    bot = Bot(
+        token=TOKEN, 
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
+    
+    # Webhook tozalash (polling uchun)
     await bot.delete_webhook(drop_pending_updates=True)
+    logger.info("🧹 Webhook tozalandi")
 
+    # Dispatcher
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Routerlarni ro‘yxatga olish
+    # Routerlarni ro'yxatga olish
     dp.include_router(start_router)
     dp.include_router(contact_router)
-    dp.include_router(kredit_router)          # kredit_turlari.py
+    dp.include_router(kredit_router)
     dp.include_router(pensiya_router)
     dp.include_router(ish_haqi_router)
     dp.include_router(garov_router)
@@ -54,19 +67,32 @@ async def main():
     dp.include_router(valyuta_router)
     dp.include_router(vakansiya_router)
     dp.include_router(control_router)
-    dp.include_router(kredit_admin_router)    # kredit.py (faqat admin uchun)
+    dp.include_router(kredit_admin_router)
     dp.include_router(chanel_router)
     
+    # Middleware
     dp.message.middleware(SubscriptionMiddleware())
     dp.callback_query.middleware(SubscriptionMiddleware())
 
+    # Bot buyruqlarini o'rnatish
     await set_bot_commands(bot)
-
+    
+    # Keep-alive serverni ishga tushirish
+    keep_alive()
+    
     logger.info("🤖 Bot ishga tushdi ✅")
-    await dp.start_polling(bot)
+    logger.info(f"📱 Bot username: {(await bot.get_me()).username}")
+    
+    # Polling
+    try:
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logger.info("⛔ Bot to‘xtatildi")
+        logger.info("⛔ Bot to'xtatildi")
+    except Exception as e:
+        logger.error(f"❌ Xatolik: {e}")

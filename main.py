@@ -55,7 +55,12 @@ async def main():
     # Dispatcher
     dp = Dispatcher(storage=MemoryStorage())
 
+    # Middleware ni BIRINCHI qo'shish (router'lardan oldin)
+    dp.message.middleware(SubscriptionMiddleware())
+    dp.callback_query.middleware(SubscriptionMiddleware())
+    
     # Routerlarni ro'yxatga olish
+    dp.include_router(chanel_router)  # Kanal router birinchi
     dp.include_router(start_router)
     dp.include_router(contact_router)
     dp.include_router(kredit_router)
@@ -68,11 +73,6 @@ async def main():
     dp.include_router(vakansiya_router)
     dp.include_router(control_router)
     dp.include_router(kredit_admin_router)
-    dp.include_router(chanel_router)
-    
-    # Middleware
-    dp.message.middleware(SubscriptionMiddleware())
-    dp.callback_query.middleware(SubscriptionMiddleware())
 
     # Bot buyruqlarini o'rnatish
     await set_bot_commands(bot)

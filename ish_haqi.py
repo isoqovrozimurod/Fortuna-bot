@@ -20,14 +20,14 @@ async def ish_haqi_info(callback: CallbackQuery):
         [InlineKeyboardButton(text="⬅️ Ortga", callback_data="credit_types")]
     ])
 
-try:
-    # Agar xabarda rasm (photo) bo'lsa, caption (taglavha)ni tahrirlaydi
-    if callback.message.photo:
-        await callback.message.edit_caption(caption=text, reply_markup=markup)
-    else:
-        # Agar faqat matn bo'lsa, textni tahrirlaydi
-        await callback.message.edit_text(text=text, reply_markup=markup)
-except Exception as e:
-    # Kutilmagan xatolik bo'lsa, yangi xabar sifatida yuboradi
-    await callback.message.answer(text=text, reply_markup=markup)
-    print(f"Xatolik yuz berdi: {e}")
+    try:
+        # Agar xabarda rasm (photo) bo'lsa, caption (taglavha)ni tahrirlaydi
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=text, reply_markup=markup)
+        else:
+            # Agar faqat matn bo'lsa, textni tahrirlaydi
+            await callback.message.edit_text(text=text, reply_markup=markup)
+    except Exception as e:
+        # Kutilmagan xatolik bo'lsa, yangi xabar sifatida yuboradi
+        await callback.message.answer(text=text, reply_markup=markup)
+        print(f"Xatolik yuz berdi: {e}")

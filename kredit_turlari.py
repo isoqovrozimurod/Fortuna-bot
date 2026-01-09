@@ -1,13 +1,19 @@
+from pathlib import Path
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import (
     Message,
     CallbackQuery,
     InlineKeyboardMarkup,
-    InlineKeyboardButton
+    InlineKeyboardButton,
+    FSInputFile
 )
 
 router = Router()
+
+# 📂 Banner yo‘li
+BASE_DIR = Path(__file__).resolve().parent
+BANNER = BASE_DIR / "temp" / "banner_v1.png"
 
 # === Kredit turlari klaviaturasi ===
 def kredit_turlari_kb():
@@ -21,35 +27,52 @@ def kredit_turlari_kb():
         ]
     )
 
+# === Matn ===
+def kredit_text():
+    return (
+        "💸 <b>Kreditni quyidagi shaxslar olishlari mumkin:</b>\n\n"
+        "✅ Pensionerlar\n"
+        "💼 Rasmiy daromadga ega shaxslar\n"
+        "🚗 Avtomashina egalari\n"
+        "🏢 Biznes egalari"
+    )
+
 # === /kredit_turlari komandasi ===
 @router.message(Command("kredit_turlari"))
 async def cmd_product(message: Message, bot: Bot):
-    await bot.send_message(
-        chat_id=message.chat.id,
-        text=(
-            "💸 <b>Kreditni quyidagi shaxslar olishlari mumkin:</b>\n\n"
-            "✅ Pensionerlar\n"
-            "💼 Rasmiy daromadga ega shaxslar\n"
-            "🚗 Avtomashina egalari\n"
-            "🏢 Biznes egalari"
-        ),
-        reply_markup=kredit_turlari_kb(),
-        parse_mode="HTML"
-    )
+    if BANNER.exists():
+        await bot.send_photo(
+            chat_id=message.chat.id,
+            photo=FSInputFile(BANNER),
+            caption=kredit_text(),
+            reply_markup=kredit_turlari_kb(),
+            parse_mode="HTML"
+        )
+    else:
+        await bot.send_message(
+            chat_id=message.chat.id,
+            text=kredit_text(),
+            reply_markup=kredit_turlari_kb(),
+            parse_mode="HTML"
+        )
 
 # === Kredit turlari tugmasi bosilganda ===
 @router.callback_query(F.data == "credit_types")
 async def show_credit_types(callback: CallbackQuery, bot: Bot):
     await callback.answer()
-    await bot.send_message(
-        chat_id=callback.from_user.id,
-        text=(
-            "💸 <b>Kreditni quyidagi shaxslar olishlari mumkin:</b>\n\n"
-            "✅ Pensionerlar\n"
-            "💼 Rasmiy daromadga ega shaxslar\n"
-            "🚗 Avtomashina egalari\n"
-            "🏢 Biznes egalari"
-        ),
-        reply_markup=kredit_turlari_kb(),
-        parse_mode="HTML"
-    )
+
+    if BANNER.exists():
+        await bot.send_photo(
+            chat_id=callback.from_user.id,
+            photo=FSInputFile(BANNER),
+            caption=kredit_text(),
+            reply_markup=kredit_turlari_kb(),
+            parse_mode="HTML"
+        )
+    else:
+        await bot.send_message(
+            chat_id=callback.from_user.id,
+            text=kredit_text(),
+            reply_markup=kredit_turlari_kb(),
+            parse_mode="HTML"
+        )

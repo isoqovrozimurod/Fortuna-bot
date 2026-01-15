@@ -3,12 +3,15 @@ from __future__ import annotations
 import os
 import json
 import re
-from aiogram import Router, F
+import contextlib
+from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram import BaseMiddleware
 from aiogram.exceptions import TelegramBadRequest
 from dotenv import load_dotenv
+
+from start import send_promo  # /start dagi xabarni yuboruvchi funksiya
 
 load_dotenv()
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
@@ -184,8 +187,7 @@ def subscription_keyboard(channels):
 # ================= GLOBAL MIDDLEWARE =================
 
 class SubscriptionMiddleware(BaseMiddleware):
-    """Majburiy obuna middleware"""
-    
+    """Majburiy obuna middleware"""  
     async def __call__(self, handler, event, data):
         bot = data["bot"]
 
@@ -238,7 +240,47 @@ class SubscriptionMiddleware(BaseMiddleware):
 # ================= CHECK =================
 
 @router.callback_query(F.data == "check_sub")
-async def check_sub(cb: CallbackQuery):
-    """Obunani qayta tekshirish"""
+async def check_sub(cb: CallbackQuery, bot: Bot):
+    """Obunani qayta tekshirish (an'anaviy tekshiruv)"""
     await cb.answer("🔄 Tekshirilmoqda...", show_alert=False)
-    # Middleware avtomatik tekshiradi
+
+    user_id = cb.from_user.id
+    channels = get_all_channels()
+    not_joined = []
+
+    for ch in channels:
+        try:
+            member = await bot.get_chat_member(ch, user_id)
+            # Agar foydalanuvchi kanalni tark etgan yoki chiqarib yuborilgan bo'lsa
+            if member.status in ("left", "kicked"):
+                not_joined.append(ch)
+        except TelegramBadRequest:
+            # Ko'pincha bot kanalni tekshira olmasa yoki noto'g'ri kanal bo'lsa
+            not_joined.append(ch)
+        except Exception as e:
+            print(f"❌ Kanal tekshirish xatosi {ch}: {e}")
+            # Xatolik yuz bersa, xavfsizlik uchun kanalni "yo'q" deb hisoblaymiz
+            not_joined.append(ch)
+
+    if not not_joined:
+        # Hamma kanallarga obuna bo'lgan — start.py dagi promo yuboriladi
+        with contextlib.suppress(Exception):
+            await cb.message.delete()
+        await send_promo(bot, user_id)
+        # Agar xohlasangiz, qisqa tasdiq xabari ham yuborilishi mumkin:
+        await bot.send_message(user_id, "✅ Muvaffaqiyatli! Endi botdan foydalanishingiz mumkin.")
+        return
+
+    # Agar hali ba'zi kanallarga obuna bo'lmasa, shularni ko'rsatib qayta tugma chiqaramiz
+    try:
+        await cb.message.edit_text(
+            "❗ Quyidagi kanallarga hali obuna bo'lmagansiz. Iltimos, obuna bo'ling va qayta tekshiring:",
+            reply_markup=subscription_keyboard(not_joined)
+        )
+    except Exception:
+        # edit qila olmasa, yangi xabar yuboramiz
+        await bot.send_message(
+            user_id,
+            "❗ Quyidagi kanallarga hali obuna bo'lmagansiz. Iltimos, obuna bo'ling va qayta tekshiring:",
+            reply_markup=subscription_keyboard(not_joined)
+        )

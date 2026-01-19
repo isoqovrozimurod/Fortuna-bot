@@ -8,3 +8,8 @@ python-dotenv==1.0.1  # .env o'zgaruvchilarni yuklash
 matplotlib==3.8.4     # Grafik/jadval chizish
 
 # Pydantic avtomatik o'rnatiladi (aiogram dependency)
+
+gspread
+google-auth
+google-auth-oauthlib
+google-auth-httplib2

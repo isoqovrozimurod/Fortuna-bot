@@ -6,6 +6,9 @@ from dataclasses import dataclass
 # .env faylni yuklaymiz
 load_dotenv()
 
+SUPABASE_URL = os.getenv("VITE_SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("VITE_SUPABASE_SUPABASE_ANON_KEY", "")
+
 @dataclass
 class Config:
     bot_token: str

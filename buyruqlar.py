@@ -11,10 +11,11 @@ async def set_bot_commands(bot: Bot):
     # Umumiy foydalanuvchilar uchun komandalar
     default_commands = [
         BotCommand(command="start", description="Botni ishga tushurish"),
-        BotCommand(command="kredit_turlari", description="Kredit turlarini ko‘rish"),
+        BotCommand(command="kredit_turlari", description="Kredit turlarini ko'rish"),
         BotCommand(command="manzil", description="Bizning manzilimiz"),
         BotCommand(command="valyuta", description="Valyuta kursi"),
         BotCommand(command="vakansiya", description="Vakansiya"),
+        BotCommand(command="filiallar", description="Filiallar xaritasi"),
     ]
 
     # Faqat admin uchun komandalar
@@ -22,6 +23,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="kredit", description="Credit calculator"),
         BotCommand(command="job", description="vakansiya qo'shish"),
         BotCommand(command="chanel", description="majburiy obuna qo'shish"),
+        BotCommand(command="init_branches", description="Filiallarni o'rnatish"),
     ]
 
     # Barcha komandalar (umumiy + admin) admin chatida ko'rinishi uchun

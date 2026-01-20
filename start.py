@@ -22,6 +22,9 @@ def main_menu_markup():
             [
                 InlineKeyboardButton(text="📊 Kredit turlari", callback_data="credit_types"),
                 InlineKeyboardButton(text="📞 Bog'lanish", callback_data="contact"),
+            ],
+            [
+                InlineKeyboardButton(text="📍 Filiallar", callback_data="branches"),
             ]
         ]
     )

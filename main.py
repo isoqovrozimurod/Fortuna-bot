@@ -72,7 +72,7 @@ async def main():
     dp.include_router(calc_router)
     dp.include_router(valyuta_router)
     dp.include_router(vakansiya_router)
-    dp.include_router(filiallar_router)
+    #dp.include_router(filiallar_router)
     dp.include_router(control_router)
     dp.include_router(kredit_admin_router)
 

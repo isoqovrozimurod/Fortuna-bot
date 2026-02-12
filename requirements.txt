@@ -19,3 +19,6 @@ supabase==2.4.0
 
 # Math & geo hisoblashlar
 geopy==2.4.0
+
+apscheduler
+aiohttp

@@ -23,6 +23,7 @@ from control import router as control_router
 from chanel import router as chanel_router
 from chanel import SubscriptionMiddleware
 from kredit import router as kredit_admin_router
+from reklama_nazorat import router as reklama_router
 #from filiallar import router as filiallar_router
 from keep_alive import keep_alive
 
@@ -75,6 +76,7 @@ async def main():
     #dp.include_router(filiallar_router)
     dp.include_router(control_router)
     dp.include_router(kredit_admin_router)
+    dp.include_router(reklama_router)
 
     # Bot buyruqlarini o'rnatish
     await set_bot_commands(bot)

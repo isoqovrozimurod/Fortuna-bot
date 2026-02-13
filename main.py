@@ -23,7 +23,10 @@ from control import router as control_router
 from chanel import router as chanel_router
 from chanel import SubscriptionMiddleware
 from kredit import router as kredit_admin_router
-from reklama_nazorati import router as reklama_router
+
+# MUHIM: Fayl nomi reklama_nazorati.py bo'lishi shart!
+# setup_scheduler ni ham import qilamiz
+from reklama_nazorati import router as reklama_router, setup_scheduler
 #from filiallar import router as filiallar_router
 from keep_alive import keep_alive
 
@@ -76,13 +79,19 @@ async def main():
     #dp.include_router(filiallar_router)
     dp.include_router(control_router)
     dp.include_router(kredit_admin_router)
-    dp.include_router(reklama_router)
+    dp.include_router(reklama_router) # Reklama router
 
     # Bot buyruqlarini o'rnatish
     await set_bot_commands(bot)
     
     # Keep-alive serverni ishga tushirish
     keep_alive()
+    
+    # ==========================================
+    # ⏰ SCHEDULERNI ISHGA TUSHIRISH (MUHIM)
+    # Bu qator qo'shilmasa, vaqt bo'yicha tekshirmaydi
+    setup_scheduler(bot)
+    # ==========================================
     
     logger.info("🤖 Bot ishga tushdi ✅")
     logger.info(f"📱 Bot username: {(await bot.get_me()).username}")

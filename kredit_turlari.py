@@ -11,7 +11,7 @@ from aiogram.types import (
 
 router = Router()
 
-# 📂 Banner yo‘li
+# 📂 Banner yo'li
 BASE_DIR = Path(__file__).resolve().parent
 BANNER = BASE_DIR / "temp" / "banner_v1.png"
 
@@ -23,6 +23,7 @@ def kredit_turlari_kb():
             [InlineKeyboardButton(text="💼 Ish haqi", callback_data="ish_haqi")],
             [InlineKeyboardButton(text="🚗 Avtomashina garov", callback_data="garov")],
             [InlineKeyboardButton(text="🏢 Biznes uchun", callback_data="biznes")],
+            [InlineKeyboardButton(text="🤝 Hamkor", callback_data="hamkor")],
             [InlineKeyboardButton(text="⬅️ Ortga", callback_data="back_to_menu")]
         ]
     )
@@ -34,7 +35,8 @@ def kredit_text():
         "✅ Pensionerlar\n"
         "💼 Rasmiy daromadga ega shaxslar\n"
         "🚗 Avtomashina egalari\n"
-        "🏢 Biznes egalari"
+        "🏢 Biznes egalari\n"
+        "🤝 Budjet tashkiloti xodimlari (Hamkor)"
     )
 
 # === /kredit_turlari komandasi ===
@@ -60,7 +62,7 @@ async def cmd_product(message: Message, bot: Bot):
 @router.callback_query(F.data == "credit_types")
 async def show_credit_types(callback: CallbackQuery, bot: Bot):
     await callback.answer()
-
+    
     if BANNER.exists():
         await bot.send_photo(
             chat_id=callback.from_user.id,

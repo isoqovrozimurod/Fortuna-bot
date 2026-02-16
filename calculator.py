@@ -24,16 +24,24 @@ class CalcFSM(StatesGroup):
 CFG = {
     "calc_pension": {
         "name": "Pensiya krediti", "rate": 49,
-        "min": 3_000_000, "max": 30_000_000, "mmin": 12, "mmax": 24},
+        "min": 3_000_000, "max": 30_000_000, "mmin": 12, "mmax": 24
+    },
     "calc_salary": {
         "name": "Ish haqi krediti", "rate": 49,
-        "min": 3_000_000, "max": 40_000_000, "mmin": 12, "mmax": 36},
+        "min": 3_000_000, "max": 40_000_000, "mmin": 12, "mmax": 36
+    },
     "calc_auto": {
         "name": "Avto garov krediti", "rate": 54,
-        "min": 3_000_000, "max": 300_000_000, "mmin": 12, "mmax": 36},
+        "min": 3_000_000, "max": 300_000_000, "mmin": 12, "mmax": 36
+    },
     "calc_biznes": {
         "name": "Biznes uchun mikroqarz", "rate": 54,
-        "min": 10_000_000, "max": 50_000_000, "mmin": 12, "mmax": 24,
+        "min": 10_000_000, "max": 50_000_000, "mmin": 12, "mmax": 24
+    },
+    "calc_hamkor": {
+        "name": "Hamkor krediti", "rate": 56,
+        "min": 3_000_000, "max": 20_000_000, "mmin": 12, "mmax": 12,
+        "grace_days": 30  # Dastlabki 30 kun foizsiz
     },
 }
 
@@ -43,35 +51,77 @@ BACK_KB = InlineKeyboardMarkup(
 
 fmt = lambda n: f"{round(n):,}".replace(",", " ")
 
-# === Annuitet jadvali ===
-def ann_table(pr: int, rate: float, m: int) -> List[List]:
+# === Annuitet jadvali (grace period bilan) ===
+def ann_table(pr: int, rate: float, m: int, grace_days: int = 0) -> List[List]:
+    """
+    Annuitet to'lov jadvali.
+    grace_days=30 bo'lsa, 1-oyda foiz hisoblanmaydi.
+    """
     r = rate / 12 / 100
-    pay = pr * r / (1 - (1 + r) ** -m)
-    bal = pr
-    rows = [["Boshlanish", 0, 0, 0, pr]]
-    for i in range(1, m + 1):
-        interest = bal * r
-        principal = pay - interest
-        bal -= principal
-        rows.append([f"{i}-oy", interest, principal, pay, max(0, bal)])
-    return rows
+    
+    if grace_days >= 30:  # 1 oy grace period
+        # 1-oy: faqat asosiy qarz (foiz 0)
+        principal_first = pr / m
+        bal = pr - principal_first
+        rows = [
+            ["Boshlanish", 0, 0, 0, pr],
+            ["1-oy (imtiyoz)", 0, principal_first, principal_first, bal]
+        ]
+        
+        # 2-12 oy: qolgan summa uchun annuitet (11 oy)
+        remaining_months = m - 1
+        if remaining_months > 0:
+            pay = bal * r / (1 - (1 + r) ** -remaining_months)
+            
+            for i in range(2, m + 1):
+                interest = bal * r
+                principal = pay - interest
+                bal -= principal
+                rows.append([f"{i}-oy", interest, principal, pay, max(0, bal)])
+        
+        return rows
+    
+    else:
+        # Oddiy annuitet (grace period yo'q)
+        pay = pr * r / (1 - (1 + r) ** -m)
+        bal = pr
+        rows = [["Boshlanish", 0, 0, 0, pr]]
+        
+        for i in range(1, m + 1):
+            interest = bal * r
+            principal = pay - interest
+            bal -= principal
+            rows.append([f"{i}-oy", interest, principal, pay, max(0, bal)])
+        
+        return rows
 
-# === Differensial jadvali ===
-def diff_table(pr: int, rate: float, m: int) -> List[List]:
+# === Differensial jadvali (grace period bilan) ===
+def diff_table(pr: int, rate: float, m: int, grace_days: int = 0) -> List[List]:
+    """
+    Differensial to'lov jadvali.
+    grace_days=30 bo'lsa, 1-oyda foiz hisoblanmaydi.
+    """
     r = rate / 12 / 100
     principal = pr / m
     bal = pr
     rows = [["Boshlanish", 0, 0, 0, pr]]
+    
     for i in range(1, m + 1):
-        interest = bal * r
+        # 1-oyda grace period bo'lsa, foiz 0
+        if i == 1 and grace_days >= 30:
+            interest = 0
+        else:
+            interest = bal * r
+        
         total = principal + interest
         bal -= principal
         rows.append([f"{i}-oy", interest, principal, total, max(0, bal)])
+    
     return rows
 
 # === Jadvalni rasmga chizish ===
 def draw_png(rows: List[List], title: str, kredit_summa: float) -> BufferedInputFile:
-    headers = ["Sana", "Foizlar", "Asosiy qarz", "Oylik to‘lov", "Qoldiq summa"]
+    headers = ["Sana", "Foizlar", "Asosiy qarz", "Oylik to'lov", "Qoldiq summa"]
     body = [headers]
 
     for r in rows:
@@ -131,7 +181,7 @@ async def ask_year_or_sum(cb: CallbackQuery, state: FSMContext):
     else:
         await cb.message.answer(
             f"💳 <b>{cfg['name']}</b>\n"
-            f"Kredit summasini kiriting:\n({fmt(cfg['min'])} – {fmt(cfg['max'])}) so‘m",
+            f"Kredit summasini kiriting:\n({fmt(cfg['min'])} – {fmt(cfg['max'])}) so'm",
             parse_mode=ParseMode.HTML,
             reply_markup=BACK_KB,
         )
@@ -148,7 +198,7 @@ async def ask_sum_after_year(msg: types.Message, state: FSMContext):
     hozirgi_yil = datetime.now().year
 
     if yil < 2000 or yil > hozirgi_yil:
-        return await msg.answer(f"❗️Yil 2000 va {hozirgi_yil} oralig‘ida bo‘lishi kerak.")
+        return await msg.answer(f"❗️Yil 2000 va {hozirgi_yil} oralig'ida bo'lishi kerak.")
 
     farq = hozirgi_yil - yil
     await state.update_data(rate = 48 if farq <= 5 else CFG["calc_auto"]["rate"])
@@ -156,7 +206,7 @@ async def ask_sum_after_year(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     cfg = CFG[data["code"]]
     await msg.answer(
-        f"Kredit summasini kiriting:\n({fmt(cfg['min'])} – {fmt(cfg['max'])}) so‘m",
+        f"Kredit summasini kiriting:\n({fmt(cfg['min'])} – {fmt(cfg['max'])}) so'm",
         reply_markup=BACK_KB,
     )
     await state.set_state(CalcFSM.sum)
@@ -173,11 +223,55 @@ async def ask_months(msg: types.Message, state: FSMContext):
 
     summa = float(summa_text)
     if not cfg["min"] <= summa <= cfg["max"]:
-        return await msg.answer(f"❗️{fmt(cfg['min'])} – {fmt(cfg['max'])} oralig‘ida.")
+        return await msg.answer(f"❗️{fmt(cfg['min'])} – {fmt(cfg['max'])} oralig'ida.")
 
     await state.update_data(summa=summa)
-    await state.set_state(CalcFSM.month)
-    await msg.answer(f"📆 Muddatni kiriting ({cfg['mmin']} – {cfg['mmax']}) oy:", reply_markup=BACK_KB)
+    
+    # Agar muddat faqat bitta qiymat bo'lsa (mmin == mmax), avtomatik o'rnatamiz
+    if cfg["mmin"] == cfg["mmax"]:
+        await state.update_data(months=cfg["mmin"])
+        # To'g'ridan-to'g'ri natija chiqarish
+        await result_direct(msg, state)
+    else:
+        await state.set_state(CalcFSM.month)
+        await msg.answer(
+            f"📆 Muddatni kiriting ({cfg['mmin']} – {cfg['mmax']}) oy:",
+            reply_markup=BACK_KB
+        )
+
+# === To'g'ridan-to'g'ri natija (muddat avtomatik) ===
+async def result_direct(msg: types.Message, state: FSMContext):
+    """calc_hamkor kabi faqat bitta muddat bo'lganda ishlatiladi"""
+    data = await state.get_data()
+    cfg = CFG[data["code"]]
+    
+    months = data["months"]
+    summa = data["summa"]
+    rate = data.get("rate", cfg["rate"])
+    grace_days = cfg.get("grace_days", 0)
+
+    # Jadvallarni yaratish
+    ann_rows = ann_table(summa, rate, months, grace_days)
+    diff_rows = diff_table(summa, rate, months, grace_days)
+    
+    ann_png = draw_png(ann_rows, f"{cfg['name']} – {months} oy | Annuitet", summa)
+    diff_png = draw_png(diff_rows, f"{cfg['name']} – {months} oy | Differensial", summa)
+
+    # Rasmlarni yuborish
+    bot = msg.bot
+    await bot.send_photo(
+        msg.chat.id, ann_png,
+        caption="📄 <b>Annuitet jadval\n@Gallaorol_FBbot</b>",
+        parse_mode=ParseMode.HTML
+    )
+    await bot.send_photo(
+        msg.chat.id, diff_png,
+        caption="📄 <b>Differensial jadval\n@Gallaorol_FBbot</b>",
+        parse_mode=ParseMode.HTML
+    )
+    
+    await msg.answer("✅ Hisob-kitob tayyor!", reply_markup=BACK_KB)
+    await state.clear()
 
 # === Muddat kiritildi – natija ===
 @router.message(CalcFSM.month)
@@ -191,17 +285,30 @@ async def result(msg: types.Message, bot: Bot, state: FSMContext):
     cfg = CFG[data["code"]]
 
     if not cfg["mmin"] <= months <= cfg["mmax"]:
-        return await msg.answer(f"❗️{cfg['mmin']} – {cfg['mmax']} oy oralig‘ida.")
+        return await msg.answer(f"❗️{cfg['mmin']} – {cfg['mmax']} oy oralig'ida.")
 
     summa = data["summa"]
     rate = data.get("rate", cfg["rate"])
+    grace_days = cfg.get("grace_days", 0)
 
-    ann_png = draw_png(ann_table(summa, rate, months),
-                       f"{cfg['name']} – {months} oy | Annuitet", summa)
-    diff_png = draw_png(diff_table(summa, rate, months),
-                        f"{cfg['name']} – {months} oy | Differensial", summa)
+    # Jadvallarni yaratish
+    ann_rows = ann_table(summa, rate, months, grace_days)
+    diff_rows = diff_table(summa, rate, months, grace_days)
+    
+    ann_png = draw_png(ann_rows, f"{cfg['name']} – {months} oy | Annuitet", summa)
+    diff_png = draw_png(diff_rows, f"{cfg['name']} – {months} oy | Differensial", summa)
 
-    await bot.send_photo(msg.chat.id, ann_png, caption="📄 <b>Annuitet jadval\n@Gallaorol_FBbot</b>", parse_mode=ParseMode.HTML)
-    await bot.send_photo(msg.chat.id, diff_png, caption="📄 <b>Differensial jadval\n@Gallaorol_FBbot</b>", parse_mode=ParseMode.HTML)
-    await msg.answer("⬅️ Kredit turlari", reply_markup=BACK_KB)
+    # Rasmlarni yuborish
+    await bot.send_photo(
+        msg.chat.id, ann_png,
+        caption="📄 <b>Annuitet jadval\n@Gallaorol_FBbot</b>",
+        parse_mode=ParseMode.HTML
+    )
+    await bot.send_photo(
+        msg.chat.id, diff_png,
+        caption="📄 <b>Differensial jadval\n@Gallaorol_FBbot</b>",
+        parse_mode=ParseMode.HTML
+    )
+    
+    await msg.answer("✅ Hisob-kitob tayyor!", reply_markup=BACK_KB)
     await state.clear()

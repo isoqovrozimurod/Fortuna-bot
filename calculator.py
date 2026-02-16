@@ -55,44 +55,35 @@ fmt = lambda n: f"{round(n):,}".replace(",", " ")
 def ann_table(pr: int, rate: float, m: int, grace_days: int = 0) -> List[List]:
     """
     Annuitet to'lov jadvali.
-    grace_days=30 bo'lsa, 1-oyda foiz hisoblanmaydi (Hamkor uchun).
+    grace_days=30 bo'lsa, 1-oyda foiz 0 qilinadi, lekin asosiy qarz
+    oddiy annuitet formula bo'yicha hisoblangan qiymatda qoladi (Hamkor uchun).
     """
     r = rate / 12 / 100
     
-    if grace_days >= 30:  # Hamkor: oddiy annuitet, lekin 1-oy foiz=0
-        # Oddiy annuitet to'lov hisoblanadi (barcha oylar uchun bir xil)
-        pay = pr * r / (1 - (1 + r) ** -m)
-        bal = pr
-        rows = [["Boshlanish", 0, 0, 0, pr]]
-        
-        for i in range(1, m + 1):
-            if i == 1:
-                # 1-oy: foiz=0, to'lov to'liq asosiy qarzga ketadi
-                interest = 0
-                principal = pay
-            else:
-                # 2-12 oy: oddiy annuitet formula
-                interest = bal * r
-                principal = pay - interest
-            
-            bal -= principal
-            rows.append([f"{i}-oy", interest, principal, pay, max(0, bal)])
-        
-        return rows
+    # Oddiy annuitet to'lov (barcha oylar uchun bir xil)
+    pay = pr * r / (1 - (1 + r) ** -m)
+    bal = pr
+    rows = [["Boshlanish", 0, 0, 0, pr]]
     
-    else:
-        # Oddiy annuitet (grace period yo'q)
-        pay = pr * r / (1 - (1 + r) ** -m)
-        bal = pr
-        rows = [["Boshlanish", 0, 0, 0, pr]]
+    for i in range(1, m + 1):
+        # Oddiy annuitet formula bilan foiz va asosiy qarzni hisoblash
+        interest = bal * r
+        principal = pay - interest
         
-        for i in range(1, m + 1):
-            interest = bal * r
-            principal = pay - interest
-            bal -= principal
-            rows.append([f"{i}-oy", interest, principal, pay, max(0, bal)])
+        if i == 1 and grace_days >= 30:
+            # 1-oy: foizni 0 qilamiz, asosiy qarz o'zgarmas
+            actual_interest = 0
+            actual_payment = principal  # Faqat asosiy qarz to'lanadi
+        else:
+            # 2-12 oy: oddiy to'lov
+            actual_interest = interest
+            actual_payment = pay
         
-        return rows
+        # Balans asosiy qarz bilan kamayadi (foiz 0 bo'lsa ham)
+        bal -= principal
+        rows.append([f"{i}-oy", actual_interest, principal, actual_payment, max(0, bal)])
+    
+    return rows
 
 # === Differensial jadvali (grace period bilan) ===
 def diff_table(pr: int, rate: float, m: int, grace_days: int = 0) -> List[List]:

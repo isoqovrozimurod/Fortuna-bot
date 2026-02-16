@@ -55,29 +55,28 @@ fmt = lambda n: f"{round(n):,}".replace(",", " ")
 def ann_table(pr: int, rate: float, m: int, grace_days: int = 0) -> List[List]:
     """
     Annuitet to'lov jadvali.
-    grace_days=30 bo'lsa, 1-oyda foiz hisoblanmaydi.
+    grace_days=30 bo'lsa, 1-oyda foiz hisoblanmaydi (Hamkor uchun).
     """
     r = rate / 12 / 100
     
-    if grace_days >= 30:  # 1 oy grace period
-        # 1-oy: faqat asosiy qarz (foiz 0)
-        principal_first = pr / m
-        bal = pr - principal_first
-        rows = [
-            ["Boshlanish", 0, 0, 0, pr],
-            ["1-oy (imtiyoz)", 0, principal_first, principal_first, bal]
-        ]
+    if grace_days >= 30:  # Hamkor: oddiy annuitet, lekin 1-oy foiz=0
+        # Oddiy annuitet to'lov hisoblanadi (barcha oylar uchun bir xil)
+        pay = pr * r / (1 - (1 + r) ** -m)
+        bal = pr
+        rows = [["Boshlanish", 0, 0, 0, pr]]
         
-        # 2-12 oy: qolgan summa uchun annuitet (11 oy)
-        remaining_months = m - 1
-        if remaining_months > 0:
-            pay = bal * r / (1 - (1 + r) ** -remaining_months)
-            
-            for i in range(2, m + 1):
+        for i in range(1, m + 1):
+            if i == 1:
+                # 1-oy: foiz=0, to'lov to'liq asosiy qarzga ketadi
+                interest = 0
+                principal = pay
+            else:
+                # 2-12 oy: oddiy annuitet formula
                 interest = bal * r
                 principal = pay - interest
-                bal -= principal
-                rows.append([f"{i}-oy", interest, principal, pay, max(0, bal)])
+            
+            bal -= principal
+            rows.append([f"{i}-oy", interest, principal, pay, max(0, bal)])
         
         return rows
     
@@ -99,18 +98,19 @@ def ann_table(pr: int, rate: float, m: int, grace_days: int = 0) -> List[List]:
 def diff_table(pr: int, rate: float, m: int, grace_days: int = 0) -> List[List]:
     """
     Differensial to'lov jadvali.
-    grace_days=30 bo'lsa, 1-oyda foiz hisoblanmaydi.
+    grace_days=30 bo'lsa, 1-oyda foiz hisoblanmaydi (Hamkor uchun).
     """
     r = rate / 12 / 100
-    principal = pr / m
+    principal = pr / m  # Har oyda bir xil asosiy qarz
     bal = pr
     rows = [["Boshlanish", 0, 0, 0, pr]]
     
     for i in range(1, m + 1):
-        # 1-oyda grace period bo'lsa, foiz 0
         if i == 1 and grace_days >= 30:
+            # 1-oy: foiz=0, faqat asosiy qarz
             interest = 0
         else:
+            # 2-12 oy: oddiy differensial formula
             interest = bal * r
         
         total = principal + interest

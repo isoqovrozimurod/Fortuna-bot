@@ -535,8 +535,8 @@ async def debug_command(message: Message):
         f"⚙️ Env variables:\n"
         f"ADMIN_ID: <code>{ADMIN_ID}</code>\n"
         f"GROUP_ID: <code>{GROUP_ID}</code>\n\n"
-        f"{'✅ ADMIN_ID to\'g\'ri' if message.from_user.id == ADMIN_ID else '❌ ADMIN_ID noto\'g\'ri'}\n"
-        f"{'✅ GROUP_ID sozlangan' if GROUP_ID != 0 else '❌ GROUP_ID sozlanmagan'}",
+        f"{('✅ ADMIN_ID togri' if message.from_user.id == ADMIN_ID else '❌ ADMIN_ID notogri')}\n"
+        f"{('✅ GROUP_ID sozlangan' if GROUP_ID != 0 else '❌ GROUP_ID sozlanmagan')}",
         parse_mode="HTML"
     )
 

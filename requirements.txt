@@ -22,3 +22,4 @@ geopy==2.4.0
 
 apscheduler
 aiohttp
+upstash-redis

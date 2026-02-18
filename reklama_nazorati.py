@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 from aiogram import Router, Bot, F
 from aiogram.types import Message, ChatMemberUpdated, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from aiogram.filters import ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER
+from aiogram.filters import ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER, Command
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -172,7 +172,7 @@ def is_admin_in_group(message: Message) -> bool:
 
 # =================== RO'YXATDAN O'TKAZISH ===================
 
-@router.message(F.text == "/start_register")
+@router.message(Command("start_register"))
 async def start_registration_process(message: Message):
     if not is_admin_in_group(message):
         return
@@ -421,7 +421,7 @@ def setup_scheduler(bot: Bot):
 
 # =================== ADMIN BUYRUQLARI ===================
 
-@router.message(F.text == "/reklama_tekshir")
+@router.message(Command("reklama_tekshir"))
 async def manual_check(message: Message, bot: Bot):
     """Qo'lda tekshirish (faqat admin, faqat guruhda)"""
     if not is_admin_in_group(message):
@@ -436,7 +436,7 @@ async def manual_check(message: Message, bot: Bot):
         pass
 
 
-@router.message(F.text == "/reklama_stat")
+@router.message(Command("reklama_stat"))
 async def show_stats(message: Message):
     """Statistika (faqat admin, faqat guruhda)"""
     if not is_admin_in_group(message):
@@ -476,7 +476,7 @@ async def show_stats(message: Message):
         pass
 
 
-@router.message(F.text == "/reklama_users")
+@router.message(Command("reklama_users"))
 async def list_users(message: Message):
     """Barcha foydalanuvchilar (faqat admin, faqat guruhda)"""
     if not is_admin_in_group(message):
@@ -522,7 +522,26 @@ async def list_users(message: Message):
         pass
 
 
-@router.message(F.text == "/reklama_help")
+@router.message(Command("debug_reklama"))
+async def debug_command(message: Message):
+    """Sozlamalarni tekshirish (faqat admin, private chatda)"""
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    await message.answer(
+        f"🔧 <b>Debug ma'lumotlar:</b>\n\n"
+        f"👤 Sizning ID: <code>{message.from_user.id}</code>\n"
+        f"💬 Chat ID: <code>{message.chat.id}</code>\n\n"
+        f"⚙️ Env variables:\n"
+        f"ADMIN_ID: <code>{ADMIN_ID}</code>\n"
+        f"GROUP_ID: <code>{GROUP_ID}</code>\n\n"
+        f"{'✅ ADMIN_ID to\'g\'ri' if message.from_user.id == ADMIN_ID else '❌ ADMIN_ID noto\'g\'ri'}\n"
+        f"{'✅ GROUP_ID sozlangan' if GROUP_ID != 0 else '❌ GROUP_ID sozlanmagan'}",
+        parse_mode="HTML"
+    )
+
+
+@router.message(Command("reklama_help"))
 async def help_command(message: Message):
     """Yordam (faqat admin, faqat guruhda)"""
     if not is_admin_in_group(message):

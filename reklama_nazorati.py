@@ -1,26 +1,27 @@
 """
-Reklama Nazorat Tizimi - Optimallashtirilgan versiya
+Reklama Nazorat Tizimi - Upstash Redis versiya
 Har kuni 09:30 va 15:00 da screenshot tekshirish
+Ma'lumotlar Upstash Redis da saqlanadi (deploy da o'chmaydi)
 """
 
 import os
 import json
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
 from aiogram import Router, Bot, F
 from aiogram.types import Message, ChatMemberUpdated, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from upstash_redis import Redis
 
-# Router va Logger
+# =================== SOZLAMALAR ===================
+
 router = Router()
 logger = logging.getLogger(__name__)
 
-# Sozlamalar
 try:
     GROUP_ID = int(os.getenv("GROUP_ID", "0"))
     ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
@@ -30,97 +31,159 @@ except (ValueError, TypeError):
     logger.error("❌ GROUP_ID yoki ADMIN_ID noto'g'ri formatda!")
 
 CHANNEL_LINK = "https://t.me/FORTUNABIZNES_GALLAOROL"
-DATA_FILE = Path("reklama_data.json")
 
-# =================== YORDAMCHI FUNKSIYALAR ===================
+# Redis ulanish
+redis = Redis(
+    url=os.getenv("UPSTASH_REDIS_REST_URL"),
+    token=os.getenv("UPSTASH_REDIS_REST_TOKEN")
+)
 
-def load_data() -> dict:
-    """Ma'lumotlarni o'qish (xavfsiz)"""
-    if not DATA_FILE.exists():
-        return {"users": {}, "screenshots": {}, "stats": {"total_checks": 0}}
-    
+# =================== REDIS YORDAMCHI FUNKSIYALAR ===================
+
+def get_today() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def redis_get(key: str):
+    """Redis dan JSON o'qish"""
     try:
-        with DATA_FILE.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-            # Eski formatni yangilash
-            if "stats" not in data:
-                data["stats"] = {"total_checks": 0}
-            return data
-    except (json.JSONDecodeError, IOError) as e:
-        logger.error(f"Ma'lumotlarni o'qishda xato: {e}")
-        # Backup yaratish
-        if DATA_FILE.exists():
-            backup_file = Path(f"reklama_data_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-            DATA_FILE.rename(backup_file)
-            logger.info(f"Backup yaratildi: {backup_file}")
-        return {"users": {}, "screenshots": {}, "stats": {"total_checks": 0}}
+        val = redis.get(key)
+        if val is None:
+            return None
+        if isinstance(val, (dict, list)):
+            return val
+        return json.loads(val)
+    except Exception as e:
+        logger.error(f"Redis get xato ({key}): {e}")
+        return None
 
 
-def save_data(data: dict) -> bool:
-    """Ma'lumotlarni saqlash (xavfsiz)"""
+def redis_set(key: str, value) -> bool:
+    """Redis ga JSON saqlash"""
     try:
-        # Temp faylga yozish (atomic write)
-        temp_file = DATA_FILE.with_suffix('.tmp')
-        with temp_file.open("w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        
-        # Temp faylni asosiy faylga o'zgartirish
-        temp_file.replace(DATA_FILE)
+        redis.set(key, json.dumps(value, ensure_ascii=False))
         return True
-    except IOError as e:
-        logger.error(f"Ma'lumotlarni saqlashda xato: {e}")
+    except Exception as e:
+        logger.error(f"Redis set xato ({key}): {e}")
         return False
 
 
-def get_today() -> str:
-    """Bugungi sana (YYYY-MM-DD)"""
-    return datetime.now().strftime("%Y-%m-%d")
+def get_all_user_ids() -> list:
+    """Barcha user IDlarini olish"""
+    try:
+        val = redis.get("user_ids")
+        if val is None:
+            return []
+        if isinstance(val, list):
+            return val
+        return json.loads(val)
+    except Exception as e:
+        logger.error(f"user_ids o'qishda xato: {e}")
+        return []
 
+
+def add_user_id(user_id: str):
+    """User IDni ro'yxatga qo'shish"""
+    ids = get_all_user_ids()
+    if user_id not in ids:
+        ids.append(user_id)
+        redis.set("user_ids", json.dumps(ids))
+
+
+# =================== FOYDALANUVCHI BOSHQARUVI ===================
 
 def register_user_in_db(user) -> bool:
     """
     Foydalanuvchini bazaga qo'shish/yangilash
     Returns: True - yangi, False - mavjud
     """
-    data = load_data()
     user_id = str(user.id)
-    
-    if user_id not in data["users"]:
-        data["users"][user_id] = {
+    today = get_today()
+    key = f"user:{user_id}"
+
+    existing = redis_get(key)
+
+    if existing is None:
+        redis_set(key, {
             "fullname": user.full_name,
             "username": user.username or "mavjud_emas",
-            "registered_at": get_today(),
+            "registered_at": today,
             "status": "active",
-            "last_seen": get_today()
-        }
-        save_data(data)
+            "last_seen": today
+        })
+        add_user_id(user_id)
         logger.info(f"✅ Yangi foydalanuvchi: {user.full_name} (ID: {user_id})")
         return True
     else:
-        # Ma'lumotlarni yangilash
-        data["users"][user_id]["fullname"] = user.full_name
-        data["users"][user_id]["username"] = user.username or "mavjud_emas"
-        data["users"][user_id]["last_seen"] = get_today()
-        save_data(data)
+        existing["fullname"] = user.full_name
+        existing["username"] = user.username or "mavjud_emas"
+        existing["last_seen"] = today
+        redis_set(key, existing)
         return False
+
+
+def get_user(user_id: str):
+    return redis_get(f"user:{user_id}")
+
+
+def set_user_status(user_id: str, status: str):
+    user = get_user(user_id)
+    if user:
+        user["status"] = status
+        if status == "left":
+            user["left_date"] = get_today()
+        redis_set(f"user:{user_id}", user)
+
+
+def get_screenshot_count(user_id: str) -> int:
+    today = get_today()
+    data = redis_get(f"screenshot:{user_id}")
+    if data is None:
+        return 0
+    if data.get("date") != today:
+        return 0
+    return data.get("count", 0)
+
+
+def increment_screenshot(user_id: str) -> int:
+    today = get_today()
+    key = f"screenshot:{user_id}"
+    data = redis_get(key)
+
+    if data is None or data.get("date") != today:
+        redis_set(key, {"date": today, "count": 1})
+        return 1
+
+    new_count = data["count"] + 1
+    redis_set(key, {"date": today, "count": new_count})
+    return new_count
+
+
+# =================== ADMIN TEKSHIRUVI ===================
+
+def is_admin_in_group(message: Message) -> bool:
+    return (
+        message.from_user.id == ADMIN_ID and
+        message.chat.id == GROUP_ID and
+        ADMIN_ID != 0 and
+        GROUP_ID != 0
+    )
 
 
 # =================== RO'YXATDAN O'TKAZISH ===================
 
 @router.message(F.text == "/start_register")
 async def start_registration_process(message: Message):
-    """Admin buyrug'i: Barchani ro'yxatdan o'tishga chaqirish (faqat guruhda)"""
-    
     if not is_admin_in_group(message):
         return
-    
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="✅ MEN SHU YERDAMAN (Tasdiqlash)", 
+            text="✅ MEN SHU YERDAMAN (Tasdiqlash)",
             callback_data="register_me"
         )]
     ])
-    
+
     text = (
         "📢 <b>DIQQAT, GURUH A'ZOLARI!</b>\n\n"
         "Bot bazasini yangilash uchun barcha xodimlar quyidagi tugmani bosishi SHART!\n\n"
@@ -130,31 +193,20 @@ async def start_registration_process(message: Message):
         "• Avtomatik ogohlantirishlar olmaydi\n\n"
         "👇 <b>Hoziroq bosing:</b>"
     )
-    
-    await message.bot.send_message(GROUP_ID, text, reply_markup=keyboard)
-    
-    # Admin buyrug'ini o'chirish
+
+    await message.bot.send_message(GROUP_ID, text, reply_markup=keyboard, parse_mode="HTML")
+
     try:
         await message.delete()
     except:
         pass
-    
-    # Statni yangilash
-    data = load_data()
-    data["stats"]["last_registration"] = {
-        "date": get_today(),
-        "time": datetime.now().strftime("%H:%M"),
-        "admin_id": message.from_user.id
-    }
-    save_data(data)
 
 
 @router.callback_query(F.data == "register_me")
 async def process_registration(callback: CallbackQuery):
-    """Tugmani bosganda ro'yxatga olish"""
     user = callback.from_user
     is_new = register_user_in_db(user)
-    
+
     if is_new:
         await callback.answer("✅ Siz ro'yxatga olindingiz! Rahmat.", show_alert=True)
     else:
@@ -165,37 +217,25 @@ async def process_registration(callback: CallbackQuery):
 
 @router.chat_member(ChatMemberUpdatedFilter(IS_NOT_MEMBER >> IS_MEMBER))
 async def user_joined(event: ChatMemberUpdated):
-    """Yangi kirganlarni avtomatik ilib olish"""
     if event.chat.id != GROUP_ID:
         return
-    
     user = event.new_chat_member.user
-    is_new = register_user_in_db(user)
-    
-    if is_new:
-        logger.info(f"👋 Guruhga qo'shildi: {user.full_name}")
+    register_user_in_db(user)
+    logger.info(f"👋 Guruhga qo'shildi: {user.full_name}")
 
 
 @router.chat_member(ChatMemberUpdatedFilter(IS_MEMBER >> IS_NOT_MEMBER))
 async def user_left(event: ChatMemberUpdated):
-    """Chiqib ketganlarni nofaol qilish"""
     if event.chat.id != GROUP_ID:
         return
-    
     user = event.new_chat_member.user
-    data = load_data()
-    user_id = str(user.id)
-    
-    if user_id in data["users"]:
-        data["users"][user_id]["status"] = "left"
-        data["users"][user_id]["left_date"] = get_today()
-        save_data(data)
-        logger.info(f"👋 Guruhdan chiqdi: {user.full_name}")
+    set_user_status(str(user.id), "left")
+    logger.info(f"👋 Guruhdan chiqdi: {user.full_name}")
 
 
 @router.message(F.chat.id == GROUP_ID, ~F.photo)
 async def capture_text_messages(message: Message):
-    """Har qanday yozgan odamni sezdirmasdan ro'yxatga olish"""
+    """Guruhda yozgan har kimni sezdirmasdan ro'yxatga olish"""
     if message.from_user and not message.from_user.is_bot:
         register_user_in_db(message.from_user)
 
@@ -204,83 +244,54 @@ async def capture_text_messages(message: Message):
 
 @router.message(F.chat.id == GROUP_ID, F.photo)
 async def photo_received(message: Message):
-    """Screenshot qabul qilish va hisoblash"""
     user = message.from_user
-    
-    # Bot'larni ignore qilish
     if user.is_bot:
         return
-    
+
     user_id = str(user.id)
-    today = get_today()
-    
-    # 1. Ro'yxatga olish
     register_user_in_db(user)
-    data = load_data()
+    count = increment_screenshot(user_id)
 
-    # 2. Screenshot hisoblash
-    if user_id not in data["screenshots"]:
-        data["screenshots"][user_id] = {"date": today, "count": 0}
-
-    # Sana o'zgargan bo'lsa reset
-    if data["screenshots"][user_id]["date"] != today:
-        data["screenshots"][user_id] = {"date": today, "count": 0}
-    
-    data["screenshots"][user_id]["count"] += 1
-    count = data["screenshots"][user_id]["count"]
-    
-    save_data(data)
-    
-    # 3. Javob qaytarish
     if count == 1:
-        emoji = "📸"
-        status = "Birinchi screenshot qabul qilindi!"
+        emoji, status = "📸", "Birinchi screenshot qabul qilindi!"
     elif count == 2:
-        emoji = "✅"
-        status = "Ajoyib! Kunlik rejangiz bajarildi!"
+        emoji, status = "✅", "Ajoyib! Kunlik rejangiz bajarildi!"
     else:
-        emoji = "🎉"
-        status = f"Zo'r! {count}-screenshot qabul qilindi!"
-    
+        emoji, status = "🎉", f"Zo'r! {count}-screenshot qabul qilindi!"
+
     response_text = (
         f"{emoji} <b>Qabul qilindi!</b>\n"
         f"👤 {user.full_name}\n"
         f"📊 Bugungi natija: <b>{count}/2 screenshot</b>\n"
         f"💬 {status}"
     )
-    
+
     try:
-        await message.reply(response_text)
+        await message.reply(response_text, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Javob yuborishda xato: {e}")
 
 
-# =================== NAZORAT (09:30 va 15:00) ===================
+# =================== NAZORAT HISOBOTI ===================
 
 async def check_screenshots(bot: Bot):
-    """Hisobot va ogohlantirish"""
     if GROUP_ID == 0:
-        logger.error("❌ GROUP_ID sozlanmagan, tekshiruv o'tkazilmaydi!")
+        logger.error("❌ GROUP_ID sozlanmagan!")
         return
-    
-    data = load_data()
-    today = get_today()
-    
-    total_users = 0
-    debtors = []  # Qarzdorlar
-    completed = 0  # Bajarganlar
 
-    # Faqat faol foydalanuvchilarni tekshirish
-    for user_id, user_info in data["users"].items():
-        if user_info.get("status", "active") != "active":
+    user_ids = get_all_user_ids()
+    total_users = 0
+    debtors = []
+    completed = 0
+
+    for user_id in user_ids:
+        user_info = get_user(user_id)
+        if not user_info or user_info.get("status") != "active":
             continue
-        
+
         total_users += 1
-        stats = data["screenshots"].get(user_id, {})
-        
-        # Bugungi screenshot soni
-        count = stats.get("count", 0) if stats.get("date") == today else 0
-        
+        count = get_screenshot_count(user_id)
+
         if count < 2:
             debtors.append({
                 "name": user_info["fullname"],
@@ -290,22 +301,9 @@ async def check_screenshots(bot: Bot):
         else:
             completed += 1
 
-    # Statistika yangilash
-    data["stats"]["total_checks"] += 1
-    data["stats"]["last_check"] = {
-        "date": today,
-        "time": datetime.now().strftime("%H:%M"),
-        "total": total_users,
-        "completed": completed,
-        "debtors": len(debtors)
-    }
-    save_data(data)
-
-    # XABAR YUBORISH
     current_time = datetime.now().strftime("%H:%M")
-    
+
     if total_users == 0:
-        # Hech kim ro'yxatda yo'q
         logger.warning("⚠️ Bazada foydalanuvchilar yo'q!")
         if ADMIN_ID:
             try:
@@ -317,39 +315,39 @@ async def check_screenshots(bot: Bot):
             except:
                 pass
         return
-    
+
     if debtors:
+        current_hour = datetime.now().hour
+        current_minute = datetime.now().minute
+        if current_hour < 9 or (current_hour == 9 and current_minute < 30):
+            next_check = "Bugun 09:30 da"
+        elif current_hour < 15:
+            next_check = "Bugun 15:00 da"
+        else:
+            next_check = "Ertaga 09:30 da"
+
         text = (
             f"🚨 <b>NAZORAT HISOBOTI ({current_time})</b>\n\n"
             f"👥 Faol xodimlar: {total_users} ta\n"
             f"✅ Bajarganlar: {completed} ta\n"
             f"❌ Bajarmaganlar: {len(debtors)} ta\n"
-            f"📊 Bajarilish: {int(completed/total_users*100)}%\n\n"
+            f"📊 Bajarilish: {int(completed / total_users * 100)}%\n\n"
             "➖➖➖➖➖➖➖➖➖➖➖➖\n"
             "👇 <b>REKLAMA PLANINI BAJARMAGAN XODIMLAR:</b>\n\n"
         )
-        
+
         for idx, user in enumerate(debtors, 1):
             mention = f"@{user['username']}" if user['username'] != "mavjud_emas" else user['name']
             text += f"{idx}. <b>{user['name']}</b> ({mention})\n   📸 Bugun: {user['count']}/2 ❌\n\n"
-        
+
         text += (
             "➖➖➖➖➖➖➖➖➖➖➖➖\n"
             "❗️ <b>OGOHLANTIRISH!</b>\n"
             "Zudlik bilan reklama tarqatib, screenshot yuboring!\n\n"
             f"📌 Reklama manbasi:\n{CHANNEL_LINK}\n\n"
-            "⏰ Keyingi tekshiruv: "
+            f"⏰ Keyingi tekshiruv: {next_check}"
         )
-        
-        # Keyingi tekshiruv vaqtini ko'rsatish
-        current_hour = datetime.now().hour
-        if current_hour < 9 or (current_hour == 9 and datetime.now().minute < 30):
-            text += "Bugun 09:30 da"
-        elif current_hour < 15:
-            text += "Bugun 15:00 da"
-        else:
-            text += "Ertaga 09:30 da"
-        
+
         try:
             await bot.send_message(GROUP_ID, text, parse_mode="HTML")
             logger.info(f"✅ Ogohlantirish yuborildi: {len(debtors)} ta qarzdor")
@@ -360,77 +358,46 @@ async def check_screenshots(bot: Bot):
         except Exception as e:
             logger.error(f"❌ Noma'lum xato: {e}")
     else:
-        # Hamma bajargan
         success_text = (
             f"🏆 <b>AJOYIB NATIJA! ({current_time})</b>\n\n"
             "✅ <b>BARCHA XODIMLAR REJANI BAJARDI!</b>\n\n"
             f"👥 Faol xodimlar: {total_users} ta\n"
-            f"📸 Hamma 2/2 screenshot yubordi\n"
-            f"📊 Bajarilish: 100%\n\n"
+            "📸 Hamma 2/2 screenshot yubordi\n"
+            "📊 Bajarilish: 100%\n\n"
             "👏 Hamma jamoaga rahmat!\n"
             "💪 Shu tarzda davom eting!"
         )
-        
         try:
             await bot.send_message(GROUP_ID, success_text, parse_mode="HTML")
             logger.info(f"✅ Muvaffaqiyat xabari: {total_users} ta xodim")
         except Exception as e:
             logger.error(f"❌ Xabar yuborishda xato: {e}")
-    
-    # Admin uchun statistika
-    if ADMIN_ID and ADMIN_ID != 0:
-        admin_stats = (
-            f"📊 <b>Admin statistika - {current_time}</b>\n\n"
-            f"👥 Jami: {total_users}\n"
-            f"✅ Bajargan: {completed}\n"
-            f"❌ Bajarmagan: {len(debtors)}\n"
-            f"📈 Foiz: {int(completed/total_users*100)}%\n\n"
-            f"🔢 Jami tekshiruvlar: {data['stats']['total_checks']}"
-        )
-        
+
+    # Admin uchun qisqa statistika
+    if ADMIN_ID:
         try:
-            await bot.send_message(ADMIN_ID, admin_stats, parse_mode="HTML")
+            await bot.send_message(
+                ADMIN_ID,
+                f"📊 <b>Admin statistika - {current_time}</b>\n\n"
+                f"👥 Jami faol: {total_users}\n"
+                f"✅ Bajargan: {completed}\n"
+                f"❌ Bajarmagan: {len(debtors)}\n"
+                f"📈 Foiz: {int(completed / total_users * 100)}%",
+                parse_mode="HTML"
+            )
         except:
             pass
 
 
-async def reset_daily_data():
-    """Yarim tunda tozalash"""
-    data = load_data()
-    
-    # Eski screenshot ma'lumotlarini arxivlash
-    yesterday = (datetime.now().replace(hour=0, minute=0) - timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    if "archive" not in data:
-        data["archive"] = {}
-    
-    data["archive"][yesterday] = {
-        "screenshots": data["screenshots"].copy(),
-        "total_users": len(data["users"])
-    }
-    
-    # Faqat oxirgi 7 kunni saqlash
-    if len(data["archive"]) > 7:
-        sorted_dates = sorted(data["archive"].keys())
-        for old_date in sorted_dates[:-7]:
-            del data["archive"][old_date]
-    
-    # Yangi kun uchun tozalash
-    data["screenshots"] = {}
-    
-    save_data(data)
-    logger.info(f"🔄 Kunlik ma'lumotlar tozalandi va arxivlandi ({yesterday})")
-
+# =================== SCHEDULER ===================
 
 def setup_scheduler(bot: Bot):
-    """Scheduler'ni sozlash"""
     if GROUP_ID == 0:
         logger.error("❌ GROUP_ID sozlanmagan! Scheduler ishga tushmaydi.")
         return None
-    
+
     scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
-    
-    # Tekshiruvlar
+
     scheduler.add_job(
         check_screenshots,
         CronTrigger(hour=9, minute=30),
@@ -438,7 +405,7 @@ def setup_scheduler(bot: Bot):
         id="morning_check",
         replace_existing=True
     )
-    
+
     scheduler.add_job(
         check_screenshots,
         CronTrigger(hour=15, minute=0),
@@ -446,43 +413,23 @@ def setup_scheduler(bot: Bot):
         id="afternoon_check",
         replace_existing=True
     )
-    
-    # Tozalash
-    scheduler.add_job(
-        reset_daily_data,
-        CronTrigger(hour=0, minute=0),
-        id="daily_reset",
-        replace_existing=True
-    )
-    
+
     scheduler.start()
     logger.info("✅ Scheduler ishga tushdi (09:30, 15:00 tekshiruv)")
-    
     return scheduler
 
 
-# =================== ADMIN BUYRUQLARI (FAQAT GURUHDA) ===================
-
-def is_admin_in_group(message: Message) -> bool:
-    """Admin va guruh tekshiruvi"""
-    return (
-        message.from_user.id == ADMIN_ID and 
-        message.chat.id == GROUP_ID and
-        ADMIN_ID != 0 and 
-        GROUP_ID != 0
-    )
-
+# =================== ADMIN BUYRUQLARI ===================
 
 @router.message(F.text == "/reklama_tekshir")
 async def manual_check(message: Message, bot: Bot):
     """Qo'lda tekshirish (faqat admin, faqat guruhda)"""
     if not is_admin_in_group(message):
         return
-    
+
     await message.answer("🔍 Tekshirilmoqda...")
     await check_screenshots(bot)
-    
-    # Admin buyrug'ini o'chirish (guruhni tozalash)
+
     try:
         await message.delete()
     except:
@@ -494,80 +441,37 @@ async def show_stats(message: Message):
     """Statistika (faqat admin, faqat guruhda)"""
     if not is_admin_in_group(message):
         return
-    
-    data = load_data()
-    today = get_today()
-    
-    active_users = sum(1 for u in data["users"].values() if u.get("status") == "active")
+
+    user_ids = get_all_user_ids()
+    active_users = 0
     completed = 0
-    
-    for user_id in data["users"]:
-        if data["users"][user_id].get("status") != "active":
+
+    for user_id in user_ids:
+        user_info = get_user(user_id)
+        if not user_info or user_info.get("status") != "active":
             continue
-        stats = data["screenshots"].get(user_id, {})
-        if stats.get("date") == today and stats.get("count", 0) >= 2:
+        active_users += 1
+        if get_screenshot_count(user_id) >= 2:
             completed += 1
-    
+
     text = (
         f"📊 <b>Statistika - {datetime.now().strftime('%d.%m.%Y %H:%M')}</b>\n\n"
         f"👥 Faol foydalanuvchilar: {active_users}\n"
         f"✅ Bugun bajarganlar: {completed}\n"
         f"❌ Bajarmaganlar: {active_users - completed}\n"
-        f"📈 Bajarilish: {int(completed/active_users*100) if active_users > 0 else 0}%\n\n"
-        f"🔢 Jami tekshiruvlar: {data['stats'].get('total_checks', 0)}"
+        f"📈 Bajarilish: {int(completed / active_users * 100) if active_users > 0 else 0}%"
     )
-    
-    sent_message = await message.answer(text)
-    
-    # Admin buyrug'ini o'chirish
+
+    sent = await message.answer(text, parse_mode="HTML")
+
     try:
         await message.delete()
     except:
         pass
-    
-    # 30 soniyadan keyin statistikani ham o'chirish (guruhni tozalash)
+
     await asyncio.sleep(30)
     try:
-        await sent_message.delete()
-    except:
-        pass
-
-
-@router.message(F.text == "/reklama_help")
-async def help_command(message: Message):
-    """Yordam (faqat admin, faqat guruhda)"""
-    if not is_admin_in_group(message):
-        return
-    
-    text = (
-        "📋 <b>Reklama Nazorat - Yordam</b>\n\n"
-        "<b>Foydalanuvchi uchun:</b>\n"
-        "• Guruhga rasm yuboring (screenshot)\n"
-        "• Bot avtomatik hisoblaydi\n"
-        "• Har kuni kamida 2 ta screenshot kerak\n\n"
-        "<b>Admin buyruqlari (faqat guruhda):</b>\n"
-        "/start_register - Barchani ro'yxatdan o'tkazish\n"
-        "/reklama_tekshir - Qo'lda tekshirish\n"
-        "/reklama_stat - Statistika (30 soniya)\n"
-        "/reklama_help - Bu yordam\n\n"
-        "<b>Avtomatik:</b>\n"
-        "⏰ 09:30 - Ertalabki tekshiruv\n"
-        "⏰ 15:00 - Kunduzi tekshiruv\n"
-        "🌙 00:00 - Ma'lumotlar arxivlanadi"
-    )
-    
-    sent_message = await message.answer(text)
-    
-    # Admin buyrug'ini o'chirish
-    try:
-        await message.delete()
-    except:
-        pass
-    
-    # 30 soniyadan keyin yordam xabarini ham o'chirish
-    await asyncio.sleep(30)
-    try:
-        await sent_message.delete()
+        await sent.delete()
     except:
         pass
 
@@ -577,46 +481,79 @@ async def list_users(message: Message):
     """Barcha foydalanuvchilar (faqat admin, faqat guruhda)"""
     if not is_admin_in_group(message):
         return
-    
-    data = load_data()
-    today = get_today()
-    
-    active_users = [
-        (uid, info) for uid, info in data["users"].items() 
-        if info.get("status") == "active"
-    ]
-    
-    if not active_users:
+
+    user_ids = get_all_user_ids()
+    active = []
+
+    for uid in user_ids:
+        u = get_user(uid)
+        if u and u.get("status") == "active":
+            active.append((uid, u))
+
+    if not active:
         await message.answer("❌ Faol foydalanuvchilar yo'q")
         return
-    
+
     text = "👥 <b>Faol foydalanuvchilar ro'yxati:</b>\n\n"
-    
-    for user_id, user_info in active_users[:20]:  # Faqat birinchi 20 ta
-        stats = data["screenshots"].get(user_id, {})
-        count = stats.get("count", 0) if stats.get("date") == today else 0
+
+    for user_id, user_info in active[:20]:
+        count = get_screenshot_count(user_id)
         status_emoji = "✅" if count >= 2 else "⚠️"
-        
         username = f"@{user_info['username']}" if user_info['username'] != "mavjud_emas" else ""
-        
         text += (
             f"{status_emoji} <b>{user_info['fullname']}</b> {username}\n"
             f"   📸 {count}/2 screenshot\n\n"
         )
-    
-    if len(active_users) > 20:
-        text += f"\n<i>... va yana {len(active_users) - 20} ta foydalanuvchi</i>"
-    
-    sent_message = await message.answer(text)
-    
-    # O'chirish
+
+    if len(active) > 20:
+        text += f"\n<i>... va yana {len(active) - 20} ta foydalanuvchi</i>"
+
+    sent = await message.answer(text, parse_mode="HTML")
+
     try:
         await message.delete()
     except:
         pass
-    
+
     await asyncio.sleep(90)
     try:
-        await sent_message.delete()
+        await sent.delete()
+    except:
+        pass
+
+
+@router.message(F.text == "/reklama_help")
+async def help_command(message: Message):
+    """Yordam (faqat admin, faqat guruhda)"""
+    if not is_admin_in_group(message):
+        return
+
+    text = (
+        "📋 <b>Reklama Nazorat - Yordam</b>\n\n"
+        "<b>Xodimlar uchun:</b>\n"
+        "• Guruhga screenshot yuboring\n"
+        "• Bot avtomatik hisoblaydi\n"
+        "• Har kuni kamida 2 ta screenshot kerak\n\n"
+        "<b>Admin buyruqlari (faqat guruhda):</b>\n"
+        "/start_register — Barchani ro'yxatdan o'tkazish\n"
+        "/reklama_tekshir — Qo'lda tekshirish\n"
+        "/reklama_stat — Statistika (30 soniya)\n"
+        "/reklama_users — Foydalanuvchilar ro'yxati\n"
+        "/reklama_help — Bu yordam\n\n"
+        "<b>Avtomatik:</b>\n"
+        "⏰ 09:30 — Ertalabki tekshiruv\n"
+        "⏰ 15:00 — Kunduzi tekshiruv"
+    )
+
+    sent = await message.answer(text, parse_mode="HTML")
+
+    try:
+        await message.delete()
+    except:
+        pass
+
+    await asyncio.sleep(30)
+    try:
+        await sent.delete()
     except:
         pass

@@ -1,25 +1,27 @@
-# Telegram bot uchun
-aiogram==3.17.0       # Bot framework (Yangilangan versiya)
+# Core
+aiogram==3.17.0
+python-dotenv==1.0.1
 
-# Konfiguratsiya / .env
-python-dotenv==1.0.1  # .env o'zgaruvchilarni yuklash
+# HTTP health server
+aiohttp==3.9.5
 
-# Jadval rasmlari
-matplotlib==3.8.4     # Grafik/jadval chizish
+# Scheduler
+APScheduler==3.10.4
 
-# Pydantic avtomatik o'rnatiladi (aiogram dependency)
+# Upstash Redis (distributed lock + reklama nazorati uchun)
+upstash-redis==1.0.0
 
-gspread
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
+# Google Sheets
+gspread==6.1.2
+google-auth==2.35.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0
 
-# Supabase Database
+# Supabase
 supabase==2.4.0
 
-# Math & geo hisoblashlar
-geopy==2.4.0
+# Geo
+geopy==2.4.1
 
-apscheduler
-aiohttp
-upstash-redis
+# Optional (faqat ishlatsang qolsin)
+matplotlib==3.8.4

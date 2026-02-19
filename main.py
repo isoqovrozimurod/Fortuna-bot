@@ -32,8 +32,7 @@ from kredit import router as kredit_admin_router
 from hamkor import router as hamkor_router
 from reklama_nazorati import router as reklama_router, setup_scheduler
 
-
-# ---------------- LOGGING ----------------
+# =================== LOGGING ===================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -41,76 +40,69 @@ logging.basicConfig(
 logger = logging.getLogger("FortunaBot")
 
 
-# ---------------- HTTP SERVER (Koyeb/Render health) ----------------
-async def _handle_root(request: web.Request) -> web.Response:
-    return web.Response(text="Fortuna-bot is running ✅", content_type="text/plain")
+# =================== HTTP SERVER ===================
 
-async def _handle_health(request: web.Request) -> web.Response:
-    return web.Response(text="OK", content_type="text/plain")
+async def _handle_root(request: web.Request) -> web.Response:
+    return web.Response(text="Fortuna-bot is running", content_type="text/plain")
 
 async def start_http_server() -> web.AppRunner:
     port = int(os.getenv("PORT", "8000"))
     app = web.Application()
     app.router.add_get("/", _handle_root)
-    app.router.add_get("/healthz", _handle_health)
+    app.router.add_head("/", _handle_root)
+    app.router.add_get("/healthz", _handle_root)
 
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host="0.0.0.0", port=port)
     await site.start()
-
-    logger.info(f"🌐 HTTP server started on 0.0.0.0:{port}")
+    logger.info(f"HTTP server started on 0.0.0.0:{port}")
     return runner
 
 
-# ---------------- UPSTASH REDIS LOCK ----------------
+# =================== UPSTASH LOCK ===================
+
 def build_redis() -> Redis:
-    url = os.getenv("UPSTASH_REDIS_REST_URL") or os.getenv("UPSTASH_REDIS_URL")
-    token = os.getenv("UPSTASH_REDIS_REST_TOKEN") or os.getenv("UPSTASH_REDIS_TOKEN")
+    url = os.getenv("UPSTASH_REDIS_REST_URL")
+    token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
     if not url or not token:
-        raise RuntimeError("Upstash env yo'q: UPSTASH_REDIS_REST_URL va UPSTASH_REDIS_REST_TOKEN kerak")
+        raise RuntimeError("UPSTASH_REDIS_REST_URL va UPSTASH_REDIS_REST_TOKEN kerak")
     return Redis(url=url, token=token)
 
-async def acquire_lock(redis: Redis, key: str, value: str, ttl_sec: int) -> bool:
-    """
-    Upstash-redis REST: set(key, value, nx=True, ex=ttl)
-    True bo'lsa lock olindi.
-    """
+async def acquire_lock(redis: Redis, key: str, value: str, ttl: int) -> bool:
     try:
-        # upstash-redis python client: redis.set(key, value, ex=ttl_sec, nx=True)
-        resp = redis.set(key, value, ex=ttl_sec, nx=True)
-        # resp odatda "OK" yoki True qaytaradi
-        return bool(resp)
+        return bool(redis.set(key, value, ex=ttl, nx=True))
     except Exception as e:
-        logger.error(f"❌ Lock olishda xato: {e}")
+        logger.error(f"Lock olishda xato: {e}")
         return False
 
-async def refresh_lock_loop(redis: Redis, key: str, value: str, ttl_sec: int):
-    """
-    Lockni ushlab turish: har ttl/2 da expire yangilaymiz.
-    Agar lock bizniki bo'lmay qolsa — pollingni to'xtatamiz.
-    """
-    interval = max(5, ttl_sec // 2)
+async def refresh_lock_loop(redis: Redis, key: str, value: str, ttl: int):
+    interval = max(5, ttl // 2)
     while True:
         await asyncio.sleep(interval)
         try:
             cur = redis.get(key)
-            if cur != value and str(cur) != str(value):
-                raise RuntimeError("Lock boshqa instancega o'tib ketdi (cur != value)")
-            redis.set(key, value, ex=ttl_sec)  # nx emas, refresh
+            if isinstance(cur, bytes):
+                cur = cur.decode()
+            if str(cur) != value:
+                raise RuntimeError(f"Lock boshqanikiga o'tdi: {cur} != {value}")
+            redis.set(key, value, ex=ttl)
         except Exception as e:
-            logger.error(f"⛔ Lock refresh to'xtadi: {e}")
+            logger.error(f"Lock refresh xato: {e}")
             raise
 
 
-# ---------------- BOT SETUP ----------------
+# =================== DISPATCHER ===================
+
 def setup_dispatcher() -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
 
+    # Middleware
     dp.message.middleware(SubscriptionMiddleware())
     dp.callback_query.middleware(SubscriptionMiddleware())
 
-    dp.include_router(chanel_router)
+    # Routerlar tartibi muhim
+    dp.include_router(chanel_router)        # kanal tekshiruv — birinchi
     dp.include_router(start_router)
     dp.include_router(contact_router)
     dp.include_router(kredit_router)
@@ -124,100 +116,105 @@ def setup_dispatcher() -> Dispatcher:
     dp.include_router(vakansiya_router)
     dp.include_router(control_router)
     dp.include_router(kredit_admin_router)
-    dp.include_router(reklama_router)
+    dp.include_router(reklama_router)       # guruh router — oxirgi
 
     return dp
 
 
-async def run_polling_with_retry(bot: Bot, dp: Dispatcher):
-    """
-    Agar boshqa joyda ham bot token bilan polling ketayotgan bo'lsa:
-    TelegramConflictError chiqadi. Biz retry qilamiz, lekin lock faqat bittada bo'ladi.
-    """
+# =================== POLLING ===================
+
+async def run_polling(bot: Bot, dp: Dispatcher):
     while True:
         try:
-            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+            await dp.start_polling(
+                bot,
+                allowed_updates=[
+                    "message",
+                    "callback_query",
+                    "chat_member",      # guruhga kirish/chiqish uchun MUHIM
+                    "my_chat_member",   # botni guruhga qo'shish/chiqarish
+                ]
+            )
         except TelegramConflictError as e:
-            logger.error(f"⚠️ TelegramConflictError (2ta polling): {e}. 15 soniyadan keyin qayta urinaman.")
+            logger.error(f"TelegramConflictError: {e}. 15s...")
             await asyncio.sleep(15)
         except TelegramNetworkError as e:
-            logger.error(f"⚠️ NetworkError: {e}. 5 soniyadan keyin qayta urinaman.")
+            logger.error(f"NetworkError: {e}. 5s...")
             await asyncio.sleep(5)
         except Exception as e:
-            logger.exception(f"❌ Pollingda noma'lum xato: {e}. 10 soniyadan keyin qayta urinaman.")
+            logger.exception(f"Polling xato: {e}. 10s...")
             await asyncio.sleep(10)
 
+
+# =================== MAIN ===================
 
 async def main():
     load_dotenv()
 
     token = os.getenv("BOT_TOKEN")
     if not token:
-        logger.error("❌ BOT_TOKEN yo'q. Platforma secrets/env ga qo'ying.")
+        logger.error("BOT_TOKEN yo'q!")
         return
 
-    # HTTP server har doim ishlasin (platforma o'chirmasin)
+    # HTTP server doim ishlaydi — Koyeb o'chirmasin
     http_runner = await start_http_server()
 
-    # Bot init
+    # Bot
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     await bot.delete_webhook(drop_pending_updates=True)
+    logger.info("Webhook tozalandi")
 
     dp = setup_dispatcher()
     await set_bot_commands(bot)
 
-    # Distributed lock (faqat bitta polling)
-    instance_id = os.getenv("KOYEB_DEPLOYMENT_ID") or os.getenv("RENDER_INSTANCE_ID") or str(os.getpid())
-    lock_key = f"fortuna:polling_lock:{token[:10]}"   # token bo'yicha unique
-    lock_value = f"{instance_id}"
-
-    scheduler = None
-    lock_task = None
+    # Distributed lock — faqat 1 ta instance polling qilsin
+    instance_id = (
+        os.getenv("KOYEB_DEPLOYMENT_ID")
+        or os.getenv("RENDER_INSTANCE_ID")
+        or str(os.getpid())
+    )
+    lock_key = f"fortuna:lock:{token[:10]}"
+    lock_value = str(instance_id)
 
     try:
         redis = build_redis()
     except Exception as e:
-        # Upstash bo'lmasa ham bot ishlashi mumkin, lekin 2 joyda yurib qolsa yana conflict bo'ladi.
-        logger.error(f"❌ Upstash Redis sozlanmagan: {e}")
-        logger.error("➡️ Xavfsiz variant: Upstash'ni sozla. Hozircha pollingni ishlatmayman.")
-        # Faqat HTTP server bilan yashab turamiz:
+        logger.error(f"Upstash Redis xato: {e}")
         await asyncio.Event().wait()
+        return
 
-    # lock TTL 60s (refresh bilan doimiy)
-    got_lock = await acquire_lock(redis, lock_key, lock_value, ttl_sec=60)
+    got_lock = await acquire_lock(redis, lock_key, lock_value, ttl=60)
 
     if not got_lock:
-        logger.warning("🟡 Bu instance pollingni olmaydi (lock band). Faqat HTTP server ishlaydi.")
-        # Hech narsa qilmaymiz, service alive bo'lib turadi
+        logger.warning("Bu instance polling qilmaydi (lock band). Faqat HTTP server.")
         await asyncio.Event().wait()
+        return
 
-    logger.info("✅ Lock olindi. Polling faqat shu instanceda ishlaydi.")
+    logger.info("Lock olindi. Polling shu instanceda ishlaydi.")
 
-    # Lock refresh background
-    lock_task = asyncio.create_task(refresh_lock_loop(redis, lock_key, lock_value, ttl_sec=60))
+    lock_task = asyncio.create_task(
+        refresh_lock_loop(redis, lock_key, lock_value, ttl=60)
+    )
 
     # Scheduler faqat polling instanceda
+    scheduler = None
     with suppress(Exception):
         scheduler = setup_scheduler(bot)
-        if scheduler:
-            logger.info("⏰ Scheduler started (only on lock holder)")
 
-    # Polling
+    me = await bot.get_me()
+    logger.info(f"Bot ishga tushdi: @{me.username}")
+
     try:
-        await run_polling_with_retry(bot, dp)
+        await run_polling(bot, dp)
     finally:
-        if lock_task:
-            lock_task.cancel()
-            with suppress(Exception):
-                await lock_task
-
+        lock_task.cancel()
+        with suppress(Exception):
+            await lock_task
         if scheduler:
             with suppress(Exception):
                 scheduler.shutdown(wait=False)
-
         with suppress(Exception):
             await http_runner.cleanup()
-
         with suppress(Exception):
             await bot.session.close()
 
@@ -226,6 +223,6 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logger.info("⛔ Bot stopped")
+        logger.info("Bot to'xtatildi")
     except Exception as e:
-        logger.exception(f"❌ Fatal error: {e}")
+        logger.exception(f"Fatal xato: {e}")

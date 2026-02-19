@@ -56,13 +56,12 @@ if not UPSTASH_URL or not UPSTASH_TOKEN:
 
 redis = Redis(url=UPSTASH_URL, token=UPSTASH_TOKEN)
 
-# Scheduler global saqlansin (GC bo‘lib ketmasin)
+# Scheduler global saqlansin (GC bo'lib ketmasin)
 SCHEDULER: AsyncIOScheduler | None = None
 
 # =================== REDIS YORDAMCHI FUNKSIYALAR ===================
 
 def _to_obj(val):
-    """Upstashdan kelgan qiymatni Python obyektga aylantirish"""
     if val is None:
         return None
     if isinstance(val, (dict, list)):
@@ -93,16 +92,13 @@ def redis_set(key: str, value) -> bool:
 
 def get_all_user_ids() -> list[str]:
     try:
-        val = redis.get("user_ids")
-        obj = _to_obj(val)
+        obj = _to_obj(redis.get("user_ids"))
         return obj if isinstance(obj, list) else []
     except Exception as e:
         logger.error(f"user_ids o'qishda xato: {e}")
         return []
 
 def add_user_id(user_id: str):
-    # ⚠️ Bu joy race condition bo‘lishi mumkin (bir paytning o‘zida 2 user)
-    # Ammo amaliyotda kam. Xohlasangiz keyin set (SADD/SMEMBERS)ga o‘tkazamiz.
     ids = get_all_user_ids()
     if user_id not in ids:
         ids.append(user_id)
@@ -112,7 +108,7 @@ def add_user_id(user_id: str):
 
 def is_admin_in_group(message: Message) -> bool:
     return (
-        message.from_user
+        message.from_user is not None
         and message.from_user.id == ADMIN_ID
         and message.chat.id == GROUP_ID
         and ADMIN_ID != 0
@@ -129,7 +125,6 @@ def register_user_in_db(user) -> bool:
     user_id = str(user.id)
     today = today_str()
     key = f"user:{user_id}"
-
     existing = redis_get(key)
 
     if existing is None or not isinstance(existing, dict):
@@ -138,13 +133,13 @@ def register_user_in_db(user) -> bool:
             "username": user.username or "mavjud_emas",
             "registered_at": today,
             "status": "active",
-            "last_seen": today
+            "last_seen": today,
         })
         add_user_id(user_id)
         logger.info(f"✅ Yangi foydalanuvchi: {user.full_name} (ID: {user_id})")
         return True
 
-    # MUHIM: qaytgan userni ham active qilamiz
+    # Qaytgan userni ham active qilamiz
     existing["fullname"] = user.full_name
     existing["username"] = user.username or "mavjud_emas"
     existing["last_seen"] = today
@@ -166,11 +161,10 @@ def set_user_status(user_id: str, status: str):
         redis_set(f"user:{user_id}", user)
 
 def get_screenshot_count(user_id: str) -> int:
-    today = today_str()
     data = redis_get(f"screenshot:{user_id}")
     if not isinstance(data, dict):
         return 0
-    if data.get("date") != today:
+    if data.get("date") != today_str():
         return 0
     return int(data.get("count", 0) or 0)
 
@@ -178,11 +172,9 @@ def increment_screenshot(user_id: str) -> int:
     today = today_str()
     key = f"screenshot:{user_id}"
     data = redis_get(key)
-
     if not isinstance(data, dict) or data.get("date") != today:
         redis_set(key, {"date": today, "count": 1})
         return 1
-
     new_count = int(data.get("count", 0) or 0) + 1
     redis_set(key, {"date": today, "count": new_count})
     return new_count
@@ -195,9 +187,11 @@ async def start_registration_process(message: Message):
         return
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ MEN SHU YERDAMAN (Tasdiqlash)", callback_data="register_me")]
+        [InlineKeyboardButton(
+            text="✅ MEN SHU YERDAMAN (Tasdiqlash)",
+            callback_data="register_me"
+        )]
     ])
-
     text = (
         "📢 <b>DIQQAT, GURUH A'ZOLARI!</b>\n\n"
         "Bot bazasini yangilash uchun barcha xodimlar quyidagi tugmani bosishi SHART!\n\n"
@@ -207,11 +201,10 @@ async def start_registration_process(message: Message):
         "• Avtomatik ogohlantirishlar olmaydi\n\n"
         "👇 <b>Hoziroq bosing:</b>"
     )
-
     await message.bot.send_message(GROUP_ID, text, reply_markup=keyboard, parse_mode="HTML")
-
     with contextlib.suppress(Exception):
         await message.delete()
+
 
 @router.callback_query(F.data == "register_me")
 async def process_registration(callback: CallbackQuery):
@@ -232,6 +225,7 @@ async def user_joined(event: ChatMemberUpdated):
     register_user_in_db(user)
     logger.info(f"👋 Guruhga qo'shildi: {user.full_name}")
 
+
 @router.chat_member(ChatMemberUpdatedFilter(IS_MEMBER >> IS_NOT_MEMBER))
 async def user_left(event: ChatMemberUpdated):
     if event.chat.id != GROUP_ID:
@@ -240,9 +234,11 @@ async def user_left(event: ChatMemberUpdated):
     set_user_status(str(user.id), "left")
     logger.info(f"👋 Guruhdan chiqdi: {user.full_name}")
 
-@router.message(F.chat.id == GROUP_ID)
+
+# FIX: ~F.photo va ~F.document — foto/document handlerlarni bloklamaslik uchun
+@router.message(F.chat.id == GROUP_ID, ~F.photo, ~F.document)
 async def capture_any_activity(message: Message):
-    """Guruhdagi har qanday aktiv userni bazada yangilab borish"""
+    """Guruhdagi matn/boshqa xabarlar orqali userni ro'yxatga olish"""
     if not message.from_user or message.from_user.is_bot:
         return
     register_user_in_db(message.from_user)
@@ -267,9 +263,9 @@ async def _handle_screenshot(message: Message, user):
         f"📊 Bugungi natija: <b>{count}/2 screenshot</b>\n"
         f"💬 {status}"
     )
-
     with contextlib.suppress(Exception):
         await message.reply(response_text, parse_mode="HTML")
+
 
 @router.message(F.chat.id == GROUP_ID, F.photo)
 async def photo_received(message: Message):
@@ -278,27 +274,25 @@ async def photo_received(message: Message):
         return
     await _handle_screenshot(message, user)
 
+
 @router.message(F.chat.id == GROUP_ID, F.document)
 async def document_received(message: Message):
-    """Screenshotni file qilib yuborishsa ham hisoblansin"""
+    """Screenshotni fayl qilib yuborishsa ham hisoblansin"""
     user = message.from_user
     if not user or user.is_bot:
         return
     doc = message.document
-    if not doc or not doc.mime_type:
-        return
-    if doc.mime_type.startswith("image/"):
+    if doc and doc.mime_type and doc.mime_type.startswith("image/"):
         await _handle_screenshot(message, user)
 
 # =================== NAZORAT HISOBOTI ===================
 
 def _mention_html(user_id: str, fullname: str) -> str:
-    # Telegram HTML mention
     safe_name = fullname.replace("<", "").replace(">", "")
     return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
 
 async def _send_long_html(bot: Bot, chat_id: int, text: str):
-    """4096 limitdan oshmasligi uchun bo‘lib yuborish"""
+    """4096 limitdan oshmasligi uchun bo'lib yuborish"""
     limit = 3800
     parts = []
     while len(text) > limit:
@@ -308,10 +302,10 @@ async def _send_long_html(bot: Bot, chat_id: int, text: str):
         parts.append(text[:cut])
         text = text[cut:]
     parts.append(text)
-
     for part in parts:
         if part.strip():
             await bot.send_message(chat_id, part, parse_mode="HTML")
+
 
 async def check_screenshots(bot: Bot):
     if GROUP_ID == 0:
@@ -327,16 +321,14 @@ async def check_screenshots(bot: Bot):
         user_info = get_user(user_id)
         if not user_info or user_info.get("status") != "active":
             continue
-
         total_users += 1
         count = get_screenshot_count(user_id)
-
         if count < 2:
             debtors.append({
                 "id": user_id,
                 "name": user_info.get("fullname", "Noma'lum"),
                 "username": user_info.get("username", "mavjud_emas"),
-                "count": count
+                "count": count,
             })
         else:
             completed += 1
@@ -349,13 +341,12 @@ async def check_screenshots(bot: Bot):
             with contextlib.suppress(Exception):
                 await bot.send_message(
                     ADMIN_ID,
-                    "⚠️ Reklama nazorat bazasida faol user yo'q!\n/start_register buyrug'ini yuboring."
+                    "⚠️ Reklama nazorat bazasida faol user yo'q!\n"
+                    "/start_register buyrug'ini yuboring."
                 )
         return
 
-    # Keyingi tekshiruv matni
-    h = now_tz().hour
-    m = now_tz().minute
+    h, m = now_tz().hour, now_tz().minute
     if h < 9 or (h == 9 and m < 30):
         next_check = "Bugun 09:30 da"
     elif h < 15:
@@ -373,16 +364,14 @@ async def check_screenshots(bot: Bot):
             "➖➖➖➖➖➖➖➖➖➖➖➖\n"
             "👇 <b>REKLAMA PLANINI BAJARMAGAN XODIMLAR:</b>\n\n"
         )
-
         lines = []
         for idx, u in enumerate(debtors, 1):
             mention = _mention_html(u["id"], u["name"])
             uname = f" (@{u['username']})" if u["username"] != "mavjud_emas" else ""
             lines.append(
-                f"{idx}. <b>{mention}</b>{uname}\n"
+                f"{idx}. {mention}{uname}\n"
                 f"   📸 Bugun: <b>{u['count']}/2</b> ❌\n"
             )
-
         footer = (
             "\n➖➖➖➖➖➖➖➖➖➖➖➖\n"
             "❗️ <b>OGOHLANTIRISH!</b>\n"
@@ -390,11 +379,8 @@ async def check_screenshots(bot: Bot):
             f"📌 Reklama manbasi:\n{CHANNEL_LINK}\n\n"
             f"⏰ Keyingi tekshiruv: {next_check}"
         )
-
-        big_text = header + "\n".join(lines) + footer
-
         try:
-            await _send_long_html(bot, GROUP_ID, big_text)
+            await _send_long_html(bot, GROUP_ID, header + "\n".join(lines) + footer)
             logger.info(f"✅ Ogohlantirish yuborildi: {len(debtors)} ta qarzdor")
         except TelegramForbiddenError:
             logger.error("❌ Botga guruhda yozish taqiqlangan!")
@@ -403,19 +389,19 @@ async def check_screenshots(bot: Bot):
         except Exception as e:
             logger.error(f"❌ Noma'lum xato: {e}")
     else:
-        success_text = (
-            f"🏆 <b>AJOYIB NATIJA! ({current_time})</b>\n\n"
-            "✅ <b>BARCHA XODIMLAR REJANI BAJARDI!</b>\n\n"
-            f"👥 Faol xodimlar: {total_users} ta\n"
-            "📸 Hamma 2/2 screenshot yubordi\n"
-            "📊 Bajarilish: 100%\n\n"
-            "👏 Hamma jamoaga rahmat!\n"
-            "💪 Shu tarzda davom eting!"
-        )
         with contextlib.suppress(Exception):
-            await bot.send_message(GROUP_ID, success_text, parse_mode="HTML")
+            await bot.send_message(
+                GROUP_ID,
+                f"🏆 <b>AJOYIB NATIJA! ({current_time})</b>\n\n"
+                "✅ <b>BARCHA XODIMLAR REJANI BAJARDI!</b>\n\n"
+                f"👥 Faol xodimlar: {total_users} ta\n"
+                "📸 Hamma 2/2 screenshot yubordi\n"
+                "📊 Bajarilish: 100%\n\n"
+                "👏 Hamma jamoaga rahmat!\n"
+                "💪 Shu tarzda davom eting!",
+                parse_mode="HTML"
+            )
 
-    # Admin uchun qisqa statistika
     if ADMIN_ID:
         with contextlib.suppress(Exception):
             await bot.send_message(
@@ -437,32 +423,21 @@ def setup_scheduler(bot: Bot):
         return None
 
     scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
-
     scheduler.add_job(
-        check_screenshots,
-        CronTrigger(hour=9, minute=30),
-        args=[bot],
-        id="morning_check",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=300,
+        check_screenshots, CronTrigger(hour=9, minute=30),
+        args=[bot], id="morning_check",
+        replace_existing=True, max_instances=1,
+        coalesce=True, misfire_grace_time=300,
     )
-
     scheduler.add_job(
-        check_screenshots,
-        CronTrigger(hour=15, minute=0),
-        args=[bot],
-        id="afternoon_check",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=300,
+        check_screenshots, CronTrigger(hour=15, minute=0),
+        args=[bot], id="afternoon_check",
+        replace_existing=True, max_instances=1,
+        coalesce=True, misfire_grace_time=300,
     )
-
     scheduler.start()
     SCHEDULER = scheduler
-    logger.info("✅ Scheduler ishga tushdi (09:30, 15:00 tekshiruv)")
+    logger.info("✅ Scheduler ishga tushdi (09:30, 15:00)")
     return scheduler
 
 # =================== ADMIN BUYRUQLARI ===================
@@ -476,6 +451,7 @@ async def manual_check(message: Message, bot: Bot):
     with contextlib.suppress(Exception):
         await message.delete()
 
+
 @router.message(Command("reklama_stat"))
 async def show_stats(message: Message):
     if not is_admin_in_group(message):
@@ -484,7 +460,6 @@ async def show_stats(message: Message):
     user_ids = get_all_user_ids()
     active_users = 0
     completed = 0
-
     for user_id in user_ids:
         user_info = get_user(user_id)
         if not user_info or user_info.get("status") != "active":
@@ -500,18 +475,79 @@ async def show_stats(message: Message):
         f"❌ Bajarmaganlar: {active_users - completed}\n"
         f"📈 Bajarilish: {int(completed / active_users * 100) if active_users > 0 else 0}%"
     )
-
     sent = await message.answer(text, parse_mode="HTML")
     with contextlib.suppress(Exception):
         await message.delete()
-
     await asyncio.sleep(30)
     with contextlib.suppress(Exception):
         await sent.delete()
 
+
+@router.message(Command("reklama_users"))
+async def list_users(message: Message):
+    if not is_admin_in_group(message):
+        return
+
+    user_ids = get_all_user_ids()
+    active = [(uid, get_user(uid)) for uid in user_ids]
+    active = [(uid, u) for uid, u in active if u and u.get("status") == "active"]
+
+    if not active:
+        await message.answer("❌ Faol foydalanuvchilar yo'q")
+        return
+
+    text = "👥 <b>Faol foydalanuvchilar ro'yxati:</b>\n\n"
+    for user_id, user_info in active[:20]:
+        count = get_screenshot_count(user_id)
+        emoji = "✅" if count >= 2 else "⚠️"
+        uname = f"@{user_info['username']}" if user_info.get("username") != "mavjud_emas" else ""
+        text += (
+            f"{emoji} <b>{user_info['fullname']}</b> {uname}\n"
+            f"   📸 {count}/2 screenshot\n\n"
+        )
+    if len(active) > 20:
+        text += f"\n<i>... va yana {len(active) - 20} ta foydalanuvchi</i>"
+
+    sent = await message.answer(text, parse_mode="HTML")
+    with contextlib.suppress(Exception):
+        await message.delete()
+    await asyncio.sleep(90)
+    with contextlib.suppress(Exception):
+        await sent.delete()
+
+
+@router.message(Command("reklama_help"))
+async def help_command(message: Message):
+    if not is_admin_in_group(message):
+        return
+
+    text = (
+        "📋 <b>Reklama Nazorat - Yordam</b>\n\n"
+        "<b>Xodimlar uchun:</b>\n"
+        "• Guruhga screenshot yuboring\n"
+        "• Bot avtomatik hisoblaydi\n"
+        "• Har kuni kamida 2 ta screenshot kerak\n\n"
+        "<b>Admin buyruqlari (faqat guruhda):</b>\n"
+        "/start_register — Barchani ro'yxatdan o'tkazish\n"
+        "/reklama_tekshir — Qo'lda tekshirish\n"
+        "/reklama_stat — Statistika (30 soniya)\n"
+        "/reklama_users — Foydalanuvchilar ro'yxati\n"
+        "/reklama_help — Bu yordam\n\n"
+        "<b>Avtomatik:</b>\n"
+        "⏰ 09:30 — Ertalabki tekshiruv\n"
+        "⏰ 15:00 — Kunduzi tekshiruv"
+    )
+    sent = await message.answer(text, parse_mode="HTML")
+    with contextlib.suppress(Exception):
+        await message.delete()
+    await asyncio.sleep(30)
+    with contextlib.suppress(Exception):
+        await sent.delete()
+
+
 @router.message(Command("debug_reklama"))
 async def debug_command(message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         return
     await message.answer(
         f"🔧 <b>Debug ma'lumotlar:</b>\n\n"

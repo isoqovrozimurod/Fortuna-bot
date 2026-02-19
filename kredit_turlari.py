@@ -13,7 +13,7 @@ router = Router()
 
 # 📂 Banner yo'li
 BASE_DIR = Path(__file__).resolve().parent
-BANNER = BASE_DIR / "temp" / "banner_v1.png"
+BANNER = BASE_DIR / "temp" / "banner_barchasi.jpg"
 
 # === Kredit turlari klaviaturasi ===
 def kredit_turlari_kb():

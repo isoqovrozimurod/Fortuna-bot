@@ -49,7 +49,7 @@ async def start_http_server() -> web.AppRunner:
     port = int(os.getenv("PORT", "8000"))
     app = web.Application()
     app.router.add_get("/", _handle_root)
-    app.router.add_head("/", _handle_root)
+    #app.router.add_head("/", _handle_root)
     app.router.add_get("/healthz", _handle_root)
 
     runner = web.AppRunner(app)

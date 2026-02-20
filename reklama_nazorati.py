@@ -550,13 +550,9 @@ async def debug_command(message: Message):
     if not message.from_user or message.from_user.id != ADMIN_ID:
         return
     await message.answer(
-        f"🔧 <b>Debug ma'lumotlar:</b>\n\n"
-        f"👤 Sizning ID: <code>{message.from_user.id}</code>\n"
-        f"💬 Chat ID: <code>{message.chat.id}</code>\n\n"
-        f"⚙️ Env variables:\n"
-        f"ADMIN_ID: <code>{ADMIN_ID}</code>\n"
-        f"GROUP_ID: <code>{GROUP_ID}</code>\n\n"
-        f"{('✅ ADMIN_ID togri' if message.from_user.id == ADMIN_ID else '❌ ADMIN_ID notogri')}\n"
-        f"{('✅ GROUP_ID sozlangan' if GROUP_ID != 0 else '❌ GROUP_ID sozlanmagan')}",
+        f"Chat ID: <code>{message.chat.id}</code>\n"
+        f"Chat type: {message.chat.type}\n"
+        f"ENV GROUP_ID: <code>{GROUP_ID}</code>\n"
+        f"Match: {'✅' if message.chat.id == GROUP_ID else '❌'}",
         parse_mode="HTML"
     )

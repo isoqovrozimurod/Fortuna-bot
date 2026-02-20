@@ -5,12 +5,14 @@ from contextlib import suppress
 
 from dotenv import load_dotenv
 from aiohttp import web
+from aiohttp import ClientTimeout
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.exceptions import TelegramConflictError, TelegramNetworkError
+from aiogram.client.session.aiohttp import AiohttpSession
 
 from upstash_redis import Redis
 
@@ -160,7 +162,11 @@ async def main():
     http_runner = await start_http_server()
 
     # Bot
-    bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot = Bot(
+    token=token,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    session=AiohttpSession(timeout=ClientTimeout(total=30))
+)
     await bot.delete_webhook(drop_pending_updates=True)
     logger.info("Webhook tozalandi")
 

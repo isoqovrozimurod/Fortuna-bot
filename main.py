@@ -5,7 +5,6 @@ from contextlib import suppress
 
 from dotenv import load_dotenv
 from aiohttp import web
-from aiohttp import ClientTimeout
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
@@ -165,7 +164,7 @@ async def main():
     bot = Bot(
     token=token,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    session=AiohttpSession(timeout=ClientTimeout(total=30))
+    session=AiohttpSession(timeout=60)
 )
     await bot.delete_webhook(drop_pending_updates=True)
     logger.info("Webhook tozalandi")

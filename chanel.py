@@ -3,15 +3,14 @@ from __future__ import annotations
 import os
 import json
 import re
-import contextlib
-from aiogram import Router, F, Bot
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram import BaseMiddleware
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
 from dotenv import load_dotenv
-
-from start import send_promo  # /start dagi xabarni yuboruvchi funksiya
 
 load_dotenv()
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
@@ -24,10 +23,15 @@ PERMANENT_CHANNEL = "@isoqovrozimurod_blog"
 CHANNEL_FILE = "channels.json"
 
 
+# =================== FSM ===================
+
+class ChannelFSM(StatesGroup):
+    waiting_channel = State()  # Faqat admin kanal yuboryotgan paytda faol
+
+
 # =================== NORMALIZE ===================
 
 def normalize_channel(text: str) -> str | None:
-    """Kanal formatini normalizatsiya qilish"""
     text = text.strip()
 
     # https://t.me/kanal yoki t.me/kanal
@@ -49,25 +53,22 @@ def normalize_channel(text: str) -> str | None:
 # ================= FILE =================
 
 def load_channels():
-    """Kanallar ro'yxatini yuklash"""
     if not os.path.exists(CHANNEL_FILE):
         return []
 
     try:
         with open(CHANNEL_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    except:
+    except Exception:
         return []
 
 
 def save_channels(data):
-    """Kanallar ro'yxatini saqlash"""
     with open(CHANNEL_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def get_all_channels():
-    """Barcha kanallarni olish (doimiy + qo'shimcha)"""
     data = load_channels()
     return [PERMANENT_CHANNEL] + data
 
@@ -75,10 +76,12 @@ def get_all_channels():
 # ================= ADMIN PANEL =================
 
 @router.message(Command("chanel"))
-async def chanel_panel(msg: Message):
-    """Admin panel"""
+async def chanel_panel(msg: Message, state: FSMContext):
     if msg.from_user.id != ADMIN_ID:
         return await msg.answer("⛔ Siz admin emassiz")
+
+    # Har qanday avvalgi FSM holatni tozalaymiz
+    await state.clear()
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Kanal qo'shish", callback_data="add_ch")],
@@ -93,46 +96,62 @@ async def chanel_panel(msg: Message):
 
 
 @router.callback_query(F.data == "add_ch")
-async def add_ch(cb: CallbackQuery):
-    """Kanal qo'shish ko'rsatmasi"""
+async def add_ch(cb: CallbackQuery, state: FSMContext):
     if cb.from_user.id != ADMIN_ID:
         return
+
+    # ← BU YERDA STATE O'RNATILADI
+    await state.set_state(ChannelFSM.waiting_channel)
+
     await cb.message.answer(
         "➕ Kanal yuboring:\n"
         "@kanal\n"
         "t.me/kanal\n"
         "https://t.me/kanal\n"
-        "-100xxxxxxxxxx"
+        "-100xxxxxxxxxx\n\n"
+        "❌ Bekor qilish uchun /cancel"
     )
 
 
-@router.message(F.text.startswith(("@", "t.me", "https://t.me", "-100")))
-async def save_channel(msg: Message):
-    """Kanalni saqlash"""
+# ← FAQAT waiting_channel HOLATIDA ISHLAYDI — boshqa handlerlarga xalaqit bermaydi
+@router.message(ChannelFSM.waiting_channel)
+async def save_channel(msg: Message, state: FSMContext):
     if msg.from_user.id != ADMIN_ID:
         return
 
+    # Bekor qilish
+    if msg.text and msg.text.strip() == "/cancel":
+        await state.clear()
+        return await msg.answer("❌ Bekor qilindi.")
+
     ch = normalize_channel(msg.text)
     if not ch:
-        return await msg.answer("❌ Noto'g'ri format")
+        return await msg.answer(
+            "⚠️ Noto'g'ri format. Qayta yuboring:\n"
+            "@kanal | t.me/kanal | -100xxxxxxxxxx\n\n"
+            "❌ Bekor qilish: /cancel"
+        )
 
     if ch == PERMANENT_CHANNEL:
+        await state.clear()
         return await msg.answer("🔒 Bu kanal doimiy majburiy, o'chirilmaydi")
 
     data = load_channels()
 
     if ch in data:
+        await state.clear()
         return await msg.answer("⚠️ Bu kanal allaqachon mavjud")
 
     data.append(ch)
     save_channels(data)
 
+    # Muvaffaqiyatli qo'shilgandan keyin holatni tozalaymiz
+    await state.clear()
     await msg.answer(f"✅ Qo'shildi: {ch}")
 
 
 @router.callback_query(F.data == "list_ch")
 async def list_channels(cb: CallbackQuery):
-    """Kanallar ro'yxati"""
     if cb.from_user.id != ADMIN_ID:
         return
 
@@ -152,7 +171,6 @@ async def list_channels(cb: CallbackQuery):
 
 @router.callback_query(F.data.startswith("delch_"))
 async def delete_ch(cb: CallbackQuery):
-    """Kanalni o'chirish"""
     if cb.from_user.id != ADMIN_ID:
         return
 
@@ -170,7 +188,6 @@ async def delete_ch(cb: CallbackQuery):
 # ================= UI =================
 
 def subscription_keyboard(channels):
-    """Obuna bo'lish tugmalari"""
     buttons = []
 
     for ch in channels:
@@ -187,7 +204,6 @@ def subscription_keyboard(channels):
 # ================= GLOBAL MIDDLEWARE =================
 
 class SubscriptionMiddleware(BaseMiddleware):
-    """Majburiy obuna middleware"""  
     async def __call__(self, handler, event, data):
         bot = data["bot"]
 
@@ -195,20 +211,14 @@ class SubscriptionMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         user = event.from_user
-        
-        # Admin uchun bypass
-        if user.id == ADMIN_ID:
-            return await handler(event, data)
-        
         chat = event.chat if isinstance(event, Message) else event.message.chat
 
         # Faqat private chat
         if chat.type != "private":
             return await handler(event, data)
 
-        # /start buyrug'i uchun bypass
         text = event.text if isinstance(event, Message) else ""
-        if text.startswith("/start"):
+        if text.startswith("/start") or text.startswith("/chanel"):
             return await handler(event, data)
 
         channels = get_all_channels()
@@ -221,14 +231,10 @@ class SubscriptionMiddleware(BaseMiddleware):
                     not_joined.append(ch)
             except TelegramBadRequest:
                 not_joined.append(ch)
-            except Exception as e:
-                print(f"❌ Kanal tekshirish xatosi {ch}: {e}")
-                continue
 
         if not not_joined:
             return await handler(event, data)
 
-        # Obuna bo'lmagan foydalanuvchiga xabar
         await bot.send_message(
             user.id,
             "❗ Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:",
@@ -240,47 +246,26 @@ class SubscriptionMiddleware(BaseMiddleware):
 # ================= CHECK =================
 
 @router.callback_query(F.data == "check_sub")
-async def check_sub(cb: CallbackQuery, bot: Bot):
-    """Obunani qayta tekshirish (an'anaviy tekshiruv)"""
-    await cb.answer("🔄 Tekshirilmoqda...", show_alert=False)
-
-    user_id = cb.from_user.id
+async def check_sub(cb: CallbackQuery):
+    bot = cb.bot
     channels = get_all_channels()
     not_joined = []
 
     for ch in channels:
         try:
-            member = await bot.get_chat_member(ch, user_id)
-            # Agar foydalanuvchi kanalni tark etgan yoki chiqarib yuborilgan bo'lsa
+            member = await bot.get_chat_member(ch, cb.from_user.id)
             if member.status in ("left", "kicked"):
                 not_joined.append(ch)
         except TelegramBadRequest:
-            # Ko'pincha bot kanalni tekshira olmasa yoki noto'g'ri kanal bo'lsa
-            not_joined.append(ch)
-        except Exception as e:
-            print(f"❌ Kanal tekshirish xatosi {ch}: {e}")
-            # Xatolik yuz bersa, xavfsizlik uchun kanalni "yo'q" deb hisoblaymiz
             not_joined.append(ch)
 
-    if not not_joined:
-        # Hamma kanallarga obuna bo'lgan — start.py dagi promo yuboriladi
-        with contextlib.suppress(Exception):
-            await cb.message.delete()
-        await send_promo(bot, user_id)
-        # Agar xohlasangiz, qisqa tasdiq xabari ham yuborilishi mumkin:
-        await bot.send_message(user_id, "✅ Muvaffaqiyatli! Endi botdan foydalanishingiz mumkin.")
-        return
-
-    # Agar hali ba'zi kanallarga obuna bo'lmasa, shularni ko'rsatib qayta tugma chiqaramiz
-    try:
-        await cb.message.edit_text(
-            "❗ Quyidagi kanallarga hali obuna bo'lmagansiz. Iltimos, obuna bo'ling va qayta tekshiring:",
-            reply_markup=subscription_keyboard(not_joined)
-        )
-    except Exception:
-        # edit qila olmasa, yangi xabar yuboramiz
-        await bot.send_message(
-            user_id,
-            "❗ Quyidagi kanallarga hali obuna bo'lmagansiz. Iltimos, obuna bo'ling va qayta tekshiring:",
-            reply_markup=subscription_keyboard(not_joined)
-        )
+    if not_joined:
+        # Hali obuna bo'lmagan kanallar bor
+        await cb.answer("❌ Hali obuna bo'lmadingiz!", show_alert=True)
+    else:
+        # Hammasi tekshirildi — start menyuni ko'rsatish
+        await cb.answer("✅ Obuna tasdiqlandi!", show_alert=False)
+        await cb.message.delete()
+        # start.py dan send_promo ni chaqiramiz
+        from start import send_promo
+        await send_promo(bot, cb.from_user.id)

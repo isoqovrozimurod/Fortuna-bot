@@ -33,6 +33,7 @@ from control import router as control_router
 from chanel import router as chanel_router, SubscriptionMiddleware
 from kredit import router as kredit_admin_router
 from hamkor import router as hamkor_router
+from filial import router as filial_router
 from reklama_nazorati import router as reklama_router, setup_scheduler
 
 # =================== LOGGING ===================
@@ -115,6 +116,7 @@ def setup_dispatcher() -> Dispatcher:
     dp.include_router(vakansiya_router)
     dp.include_router(control_router)
     dp.include_router(kredit_admin_router)
+    dp.include_router(filial_router)
     dp.include_router(reklama_router)
 
     return dp

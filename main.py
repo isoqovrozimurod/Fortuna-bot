@@ -35,6 +35,7 @@ from kredit import router as kredit_admin_router
 from hamkor import router as hamkor_router
 from filial import router as filial_router
 from reklama_nazorati import router as reklama_router, setup_scheduler
+from broadcast import router as broadcast_router
 
 # =================== LOGGING ===================
 logging.basicConfig(
@@ -118,6 +119,7 @@ def setup_dispatcher() -> Dispatcher:
     dp.include_router(kredit_admin_router)
     dp.include_router(filial_router)
     dp.include_router(reklama_router)
+    dp.include_router(broadcast_router)
 
     return dp
 

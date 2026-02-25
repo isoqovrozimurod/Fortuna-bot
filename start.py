@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from pathlib import Path
 
@@ -7,6 +8,8 @@ from aiogram import Router, Bot, types, F
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+
+from broadcast import save_user
 
 router = Router()
 
@@ -72,6 +75,9 @@ async def send_promo(bot: Bot, user_id: int):
 
 @router.message(Command("start"))
 async def cmd_start(message: types.Message, bot: Bot):
+    username = message.from_user.username or ""
+    # Foydalanuvchini Sheets'ga saqlaymiz (xato bo'lsa bot to'xtamaydi)
+    asyncio.ensure_future(save_user(message.from_user.id, username))
     await send_promo(bot, message.from_user.id)
 
 

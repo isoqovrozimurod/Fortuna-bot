@@ -248,6 +248,8 @@ async def show_filials_in_region(call: CallbackQuery):
 def _build_admin_text(b: dict) -> str:
     ichki = b.get("Ichki nomer", "")
     maps_url = b.get("Lokatsiya", "")
+    kredit = b.get("Kredit bo'limi", "")
+    unduruv = b.get("Unduruv bo'limi", "")
     text = (
         f"🏢 <b>{b['Filial']}</b>\n\n"
         f"🏙 Viloyat: {b.get('Viloyat', '')}\n"
@@ -257,8 +259,8 @@ def _build_admin_text(b: dict) -> str:
         f"📱 Shaxsiy: {b.get('Boshqaruvchi (shaxsiy) raqami', '')}\n"
         f"☎️ Filial: {b.get('Boshqaruvchi (filial) raqami', '')}\n\n"
         f"📞 Qabulxona: {b.get('Qabulxona', '')}\n"
-        f"💳 Kredit bo'limi: {b.get(\"Kredit bo'limi\", '')}\n"
-        f"📤 Unduruv: {b.get(\"Unduruv bo'limi\", '')}\n"
+        f"💳 Kredit bo'limi: {kredit}\n"
+        f"📤 Unduruv: {unduruv}\n"
         f"📊 Buxgalteriya: {b.get('Buxgalteriya', '')}\n"
     )
     if ichki:
@@ -272,12 +274,14 @@ def _build_admin_text(b: dict) -> str:
 def _build_user_text(b: dict) -> str:
     ichki = b.get("Ichki nomer", "")
     maps_url = b.get("Lokatsiya", "")
+    kredit = b.get("Kredit bo'limi", "")
+    unduruv = b.get("Unduruv bo'limi", "")
     text = (
         f"🏢 <b>{b['Filial']}</b>\n\n"
         f"📍 Manzil: {b.get('Manzil', '')}\n\n"
         f"📞 Qabulxona: {b.get('Qabulxona', '')}\n"
-        f"💳 Kredit bo'limi: {b.get(\"Kredit bo'limi\", '')}\n"
-        f"📤 Unduruv: {b.get(\"Unduruv bo'limi\", '')}\n"
+        f"💳 Kredit bo'limi: {kredit}\n"
+        f"📤 Unduruv: {unduruv}\n"
         f"📊 Buxgalteriya: {b.get('Buxgalteriya', '')}\n"
     )
     if ichki:

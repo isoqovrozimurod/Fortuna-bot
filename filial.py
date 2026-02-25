@@ -205,12 +205,23 @@ def nearest_results_kb(results: list[dict]) -> InlineKeyboardMarkup:
 @router.callback_query(F.data == "branches")
 async def branches_main(call: CallbackQuery, state: FSMContext):
     await state.clear()
-    await call.message.edit_text(
-        "📍 <b>Filiallar</b>\n\nQuyidagilardan birini tanlang:",
-        reply_markup=branches_main_kb(),
-        parse_mode="HTML",
-    )
     await call.answer()
+    try:
+        await call.message.edit_text(
+            "📍 <b>Filiallar</b>\n\nQuyidagilardan birini tanlang:",
+            reply_markup=branches_main_kb(),
+            parse_mode="HTML",
+        )
+    except Exception:
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        await call.message.answer(
+            "📍 <b>Filiallar</b>\n\nQuyidagilardan birini tanlang:",
+            reply_markup=branches_main_kb(),
+            parse_mode="HTML",
+        )
 
 
 @router.callback_query(F.data == "list_branches")

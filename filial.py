@@ -34,8 +34,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
-SPREADSHEET_ID = "1U87w2q9zk8q5_3pQqfVhp0Zp2hnU70bWWgu1R9q3No"
-SHEET_NAME = "Лист1"
+SPREADSHEET_ID = "1UU87w2q9zk8q5_3pQqfVhp0Zp2hnU70bWWgu1R9q3No"
+SHEET_NAME = "malumotlar"
 
 ISHONCH_TELEFON = "+998 55 808 40 00"
 

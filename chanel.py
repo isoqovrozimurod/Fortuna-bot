@@ -26,27 +26,20 @@ CHANNEL_FILE = "channels.json"
 # =================== FSM ===================
 
 class ChannelFSM(StatesGroup):
-    waiting_channel = State()  # Faqat admin kanal yuboryotgan paytda faol
+    waiting_channel = State()
 
 
 # =================== NORMALIZE ===================
 
 def normalize_channel(text: str) -> str | None:
     text = text.strip()
-
-    # https://t.me/kanal yoki t.me/kanal
     m = re.search(r"(?:https?://)?t\.me/([A-Za-z0-9_]+)", text)
     if m:
         return "@" + m.group(1)
-
-    # @kanal
     if text.startswith("@"):
         return text
-
-    # -100xxxxxxxxxx
     if text.startswith("-100"):
         return text
-
     return None
 
 
@@ -55,7 +48,6 @@ def normalize_channel(text: str) -> str | None:
 def load_channels():
     if not os.path.exists(CHANNEL_FILE):
         return []
-
     try:
         with open(CHANNEL_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -80,7 +72,6 @@ async def chanel_panel(msg: Message, state: FSMContext):
     if msg.from_user.id != ADMIN_ID:
         return await msg.answer("⛔ Siz admin emassiz")
 
-    # Har qanday avvalgi FSM holatni tozalaymiz
     await state.clear()
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -100,7 +91,6 @@ async def add_ch(cb: CallbackQuery, state: FSMContext):
     if cb.from_user.id != ADMIN_ID:
         return
 
-    # ← BU YERDA STATE O'RNATILADI
     await state.set_state(ChannelFSM.waiting_channel)
 
     await cb.message.answer(
@@ -113,18 +103,16 @@ async def add_ch(cb: CallbackQuery, state: FSMContext):
     )
 
 
-# ← FAQAT waiting_channel HOLATIDA ISHLAYDI — boshqa handlerlarga xalaqit bermaydi
 @router.message(ChannelFSM.waiting_channel)
 async def save_channel(msg: Message, state: FSMContext):
     if msg.from_user.id != ADMIN_ID:
         return
 
-    # Bekor qilish
     if msg.text and msg.text.strip() == "/cancel":
         await state.clear()
         return await msg.answer("❌ Bekor qilindi.")
 
-    ch = normalize_channel(msg.text)
+    ch = normalize_channel(msg.text or "")
     if not ch:
         return await msg.answer(
             "⚠️ Noto'g'ri format. Qayta yuboring:\n"
@@ -145,7 +133,6 @@ async def save_channel(msg: Message, state: FSMContext):
     data.append(ch)
     save_channels(data)
 
-    # Muvaffaqiyatli qo'shilgandan keyin holatni tozalaymiz
     await state.clear()
     await msg.answer(f"✅ Qo'shildi: {ch}")
 
@@ -188,14 +175,18 @@ async def delete_ch(cb: CallbackQuery):
 # ================= UI =================
 
 def subscription_keyboard(channels):
+    """
+    Kanallarni 'Kanal 1', 'Kanal 2' ... ko'rinishida tugma sifatida chiqaradi.
+    get_all_channels() da PERMANENT_CHANNEL birinchi o'rinda keladi,
+    shuning uchun u har doim 'Kanal 1' bo'ladi.
+    """
     buttons = []
-
-    for ch in channels:
+    for i, ch in enumerate(channels, start=1):
         if ch.startswith("@"):
             url = f"https://t.me/{ch[1:]}"
         else:
             url = f"https://t.me/c/{str(ch)[4:]}"
-        buttons.append([InlineKeyboardButton(text=f"🔔 {ch}", url=url)])
+        buttons.append([InlineKeyboardButton(text=f"📢 Kanal {i}", url=url)])
 
     buttons.append([InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_sub")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -217,7 +208,8 @@ class SubscriptionMiddleware(BaseMiddleware):
         if chat.type != "private":
             return await handler(event, data)
 
-        text = event.text if isinstance(event, Message) else ""
+        # ← TUZATILDI: event.text None bo'lishi mumkin (lokatsiya, rasm va h.k.)
+        text = (event.text or "") if isinstance(event, Message) else ""
         if text.startswith("/start") or text.startswith("/chanel"):
             return await handler(event, data)
 
@@ -260,12 +252,9 @@ async def check_sub(cb: CallbackQuery):
             not_joined.append(ch)
 
     if not_joined:
-        # Hali obuna bo'lmagan kanallar bor
         await cb.answer("❌ Hali obuna bo'lmadingiz!", show_alert=True)
     else:
-        # Hammasi tekshirildi — start menyuni ko'rsatish
         await cb.answer("✅ Obuna tasdiqlandi!", show_alert=False)
         await cb.message.delete()
-        # start.py dan send_promo ni chaqiramiz
         from start import send_promo
         await send_promo(bot, cb.from_user.id)

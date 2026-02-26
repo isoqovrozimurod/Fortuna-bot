@@ -99,15 +99,36 @@ def _find_row(user_id: int) -> int | None:
     return None
 
 
+def _find_subadmin_row_sync(user_id: int) -> int | None:
+    """Foydalanuvchi qatorini topadi (1-based), yo'q bo'lsa None"""
+    ws = get_subadmin_sheet()
+    ids = ws.col_values(2)
+    for i, val in enumerate(ids, start=1):
+        if str(val).strip() == str(user_id):
+            return i
+    return None
+
+
+def _find_first_empty_subadmin_row_sync() -> int:
+    """
+    Bo'sh qatorni topadi.
+    O'chirilgan qator bo'lsa — o'shanga yozadi (teshik qolmaydi).
+    Aks holda oxiriga qo'shadi.
+    """
+    ws = get_subadmin_sheet()
+    all_values = ws.get_all_values()
+    for i, row in enumerate(all_values[1:], start=2):
+        # Telegram ID ustuni (2-ustun, index 1) bo'sh bo'lsa
+        tg_id = row[1].strip() if len(row) > 1 else ""
+        if not tg_id:
+            return i
+    return len(all_values) + 1
+
+
 def _register_user_sync(user_id: int, full_name: str, username: str) -> bool:
     """True = yangi, False = mavjud edi"""
     ws = get_subadmin_sheet()
-    row_idx = None
-    ids = ws.col_values(2)
-    for i, val in enumerate(ids, start=1):
-        if str(val) == str(user_id):
-            row_idx = i
-            break
+    row_idx = _find_subadmin_row_sync(user_id)
 
     parts = (full_name or "").split(" ", 1)
     ism = parts[0]
@@ -115,19 +136,24 @@ def _register_user_sync(user_id: int, full_name: str, username: str) -> bool:
     uname = f"@{username}" if username else ""
     sana = now_tz().strftime("%Y-%m-%d %H:%M")
 
-    if row_idx is None:
-        # Yangi qator
-        all_rows = ws.get_all_values()
-        tr = len(all_rows)  # sarlavha + mavjud qatorlar
-        ws.append_row([str(tr), str(user_id), uname, ism, familiya, "", sana, "Faol"])
-        return True
-    else:
+    if row_idx is not None:
         # Mavjud — username va ismni yangilaymiz
         ws.update_cell(row_idx, 3, uname)
         ws.update_cell(row_idx, 4, ism)
         ws.update_cell(row_idx, 5, familiya)
         ws.update_cell(row_idx, 8, "Faol")
         return False
+    else:
+        # Bo'sh qator bormi? — o'shanga yozamiz (teshik qolmaydi)
+        target_row = _find_first_empty_subadmin_row_sync()
+
+        # T/r — hozirgi faol qatorlar soni + 1
+        all_ids = [v for v in ws.col_values(2)[1:] if str(v).strip()]
+        tr = len(all_ids) + 1
+
+        row = [str(tr), str(user_id), uname, ism, familiya, "", sana, "Faol"]
+        ws.update(f"A{target_row}:H{target_row}", [row])
+        return True
 
 
 def _set_status_sync(user_id: int, status: str):

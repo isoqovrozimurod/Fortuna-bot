@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import json
 import re
@@ -14,6 +15,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+
+# Circular import bo'lmasligi uchun lazy import ishlatamiz
+async def _ensure_user_registered(user) -> None:
+    """Har qanday xabarda foydalanuvchini ro'yxatga oladi (ID o'zgarmaydi)"""
+    try:
+        from broadcast import save_user
+        await save_user(
+            user_id=user.id,
+            full_name=user.full_name or "",
+            username=user.username or "",
+        )
+    except Exception:
+        pass
 
 router = Router()
 
@@ -207,6 +221,10 @@ class SubscriptionMiddleware(BaseMiddleware):
         # Faqat private chat
         if chat.type != "private":
             return await handler(event, data)
+
+        # Har qanday xabar/tugmada foydalanuvchini ro'yxatga olamiz
+        # /start da ham, boshqa tugmalarda ham ishlaydi
+        asyncio.ensure_future(_ensure_user_registered(user))
 
         # ← TUZATILDI: event.text None bo'lishi mumkin (lokatsiya, rasm va h.k.)
         text = (event.text or "") if isinstance(event, Message) else ""

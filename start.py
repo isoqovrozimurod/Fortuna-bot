@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import contextlib
 from pathlib import Path
 
@@ -32,7 +31,7 @@ class StartFSM(StatesGroup):
     waiting_phone = State()
 
 
-# ================= UI =================
+# ===================== KLAVIATURALAR =====================
 
 def main_menu_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -58,6 +57,8 @@ def phone_request_kb() -> ReplyKeyboardMarkup:
     )
 
 
+# ===================== PROMO MATNI =====================
+
 def promo_caption() -> str:
     return (
         "<b>✅FORTUNA BIZNES ENDI G'ALLAOROLDA</b>\n\n"
@@ -76,7 +77,7 @@ def promo_caption() -> str:
     )
 
 
-# ================= PROMO =================
+# ===================== PROMO YUBORISH =====================
 
 async def send_promo(bot: Bot, user_id: int) -> None:
     if PROMO_IMAGE.exists():
@@ -96,39 +97,37 @@ async def send_promo(bot: Bot, user_id: int) -> None:
         )
 
 
-# ================= /start =================
+# ===================== /start =====================
 
 @router.message(Command("start"))
 async def cmd_start(message: types.Message, bot: Bot, state: FSMContext):
+    await state.clear()
     user = message.from_user
 
-    # Avval foydalanuvchini ismini saqlаymiz (telefonsiz)
-    asyncio.ensure_future(
-        save_user(
+    # Sheets'dan tekshiramiz: telefon bor yoki yo'q (await — sinxron)
+    has_phone = await user_has_phone(user.id)
+
+    if has_phone:
+        # Ro'yxatdan o'tgan — darhol asosiy menyu
+        await send_promo(bot, user.id)
+    else:
+        # Yangi foydalanuvchi — avval ma'lumotlarni saqlаb, telefon so'raymiz
+        await save_user(
             user_id=user.id,
             full_name=user.full_name or "",
             username=user.username or "",
         )
-    )
-
-    # Telefon raqami allaqachon bormi?
-    has_phone = await user_has_phone(user.id)
-
-    if has_phone:
-        # Telefon bor — darhol menyu
-        await send_promo(bot, user.id)
-    else:
-        # Telefon yo'q — so'raymiz
         await state.set_state(StartFSM.waiting_phone)
         await message.answer(
-            "👋 Xush kelibsiz!\n\n"
-            "Botdan foydalanish uchun telefon raqamingizni ulashing.\n"
-            "Bu ma'lumot faqat biz bilan bog'lanish uchun ishlatiladi.",
+            "👋 <b>Xush kelibsiz!</b>\n\n"
+            "Botdan foydalanish uchun telefon raqamingizni ulashing.\n\n"
+            "👇 Quyidagi tugmani bosing:",
             reply_markup=phone_request_kb(),
+            parse_mode="HTML",
         )
 
 
-# ================= TELEFON QABUL QILISH =================
+# ===================== TELEFON QABUL QILISH =====================
 
 @router.message(StartFSM.waiting_phone, F.contact)
 async def handle_phone(message: types.Message, bot: Bot, state: FSMContext):
@@ -136,24 +135,40 @@ async def handle_phone(message: types.Message, bot: Bot, state: FSMContext):
     user = message.from_user
     phone = message.contact.phone_number
 
-    asyncio.ensure_future(
-        save_user(
-            user_id=user.id,
-            full_name=user.full_name or "",
-            username=user.username or "",
-            phone=phone,
-        )
+    # Telefon raqamini Sheets'ga yozamiz
+    await save_user(
+        user_id=user.id,
+        full_name=user.full_name or "",
+        username=user.username or "",
+        phone=phone,
     )
 
     await message.answer(
-        "✅ Rahmat! Ma'lumotlaringiz saqlandi.",
+        "✅ <b>Rahmat!</b> Ro'yxatdan muvaffaqiyatli o'tdingiz.",
         reply_markup=ReplyKeyboardRemove(),
+        parse_mode="HTML",
     )
     await send_promo(bot, user.id)
 
 
+# ===================== BOSHQA XABAR (telefon kutilayotganda) =====================
 
-# ================= Ortga =================
+@router.message(StartFSM.waiting_phone)
+async def waiting_phone_other(message: types.Message):
+    """Telefon tugmasi bosilmasdan boshqa narsa yuborilsa"""
+    await message.answer(
+        "📱 Iltimos, quyidagi tugmani bosib telefon raqamingizni ulashing:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📱 Telefon raqamni ulashish", request_contact=True)],
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        ),
+    )
+
+
+# ===================== ORQAGA =====================
 
 @router.callback_query(F.data == "back_to_menu")
 async def back_to_menu(callback: types.CallbackQuery, bot: Bot):

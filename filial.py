@@ -35,7 +35,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 SPREADSHEET_ID = "1UU87w2q9zk8q5_3pQqfVhp0Zp2hnU70bWWgu1R9q3No"
-SHEET_NAME = "malumotlar"
+SHEET_NAME = "Лист1"
 
 ISHONCH_TELEFON = "+998 55 808 40 00"
 
@@ -77,41 +77,81 @@ def is_admin(user_id: int) -> bool:
 
 # ===================== KOORDINATA OLISH =====================
 
+def _extract_coords_from_url(url: str) -> tuple[float, float] | None:
+    """
+    Google Maps URL dan aniq pin koordinatasini ajratib oladi.
+    Ustuvorlik: !3d!4d > ?q= > /place/@ > @lat,lng
+    """
+    # 1. !3dLAT!4dLNG — Google Maps pin koordinatasi (eng ishonchli)
+    m = re.search(r"!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)", url)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+
+    # 2. ?q=LAT,LNG yoki &q=LAT,LNG
+    m = re.search(r"[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)", url)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+
+    # 3. /place/ ichidagi @LAT,LNG
+    m = re.search(r"/place/[^@]+@(-?\d+\.\d+),(-?\d+\.\d+)", url)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+
+    # 4. Oddiy @LAT,LNG (xarita markazi)
+    m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)", url)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+
+    return None
+
+
 async def resolve_coords(maps_url: str) -> tuple[float, float] | None:
     """
-    maps.app.goo.gl yoki maps.google.com linkdan koordinata oladi.
-    Qisqa linkni kuzatib, oxirgi URL dagi @lat,lng ni topadi.
+    maps.app.goo.gl yoki maps.google.com linkdan aniq koordinata oladi.
     """
     if not maps_url:
         return None
 
-    # Cache da bormi?
     if maps_url in _coords_cache:
         return _coords_cache[maps_url]
 
+    # URL ning o'zini tekshiramiz
+    coords = _extract_coords_from_url(maps_url)
+    if coords:
+        _coords_cache[maps_url] = coords
+        return coords
+
     try:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            )
+        }
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 maps_url,
                 allow_redirects=True,
-                timeout=aiohttp.ClientTimeout(total=10),
-                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=aiohttp.ClientTimeout(total=15),
+                headers=headers,
             ) as resp:
                 final_url = str(resp.url)
+                body = await resp.text(errors="ignore")
 
-        # @lat,lng formatini qidirish
-        m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)", final_url)
-        if m:
-            lat, lng = float(m.group(1)), float(m.group(2))
-            _coords_cache[maps_url] = (lat, lng)
-            return lat, lng
+        # Final URL dan qidiramiz
+        coords = _extract_coords_from_url(final_url)
+        if coords:
+            _coords_cache[maps_url] = coords
+            return coords
 
-        # ?q=lat,lng formatini qidirish
-        m = re.search(r"[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)", final_url)
-        if m:
-            lat, lng = float(m.group(1)), float(m.group(2))
-            _coords_cache[maps_url] = (lat, lng)
-            return lat, lng
+        # HTML body dan qidiramiz
+        coords = _extract_coords_from_url(body)
+        if coords:
+            _coords_cache[maps_url] = coords
+            return coords
+
+        logger.warning(f"Koordinata topilmadi: {maps_url} -> {final_url[:100]}")
 
     except Exception as e:
         logger.warning(f"Koordinata olishda xato ({maps_url}): {e}")

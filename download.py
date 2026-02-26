@@ -264,8 +264,8 @@ async def handle_download(call: CallbackQuery, bot: Bot):
             await bot.send_document(
                 call.from_user.id,
                 file,
-                caption="📦 <b>Barcha ma'lumotlar</b>
-                         📁 fortuna_biznes_malumotlar.xlsx",
+                caption="""📦 <b>Barcha ma\'lumotlar</b>
+                         📁 fortuna_biznes_malumotlar.xlsx""",
                          parse_mode="HTML",
             )
         except Exception as e:

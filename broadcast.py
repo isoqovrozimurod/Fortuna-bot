@@ -68,32 +68,65 @@ def get_users_sheet() -> gspread.Worksheet:
 
 # ===================== USER OPERATSIYALARI =====================
 
+def _cleanup_sheet_sync() -> None:
+    """
+    Varaqni tozalaydi va T/r ni tartiblab qayta yozadi:
+    1. Telegram ID bo'sh qatorlarni o'chiradi
+    2. T/r ni 1 dan boshlab ketma-ket tartibda qayta yozadi
+    """
+    ws = get_users_sheet()
+    all_rows = ws.get_all_values()
+    if len(all_rows) <= 1:
+        return  # Faqat sarlavha bor
+
+    header = all_rows[0]
+    data_rows = all_rows[1:]
+
+    # Telegram ID bo'sh bo'lmagan qatorlarni olamiz
+    valid_rows = [
+        row for row in data_rows
+        if len(row) > 1 and str(row[1]).strip()
+    ]
+
+    if not valid_rows:
+        return
+
+    # T/r ni 1 dan boshlab qayta tartiblаymiz
+    for i, row in enumerate(valid_rows, start=1):
+        while len(row) < 8:
+            row.append("")
+        row[0] = str(i)
+
+    # Butun varaqni qayta yozamiz
+    total_existing = len(all_rows)
+    total_valid = len(valid_rows)
+
+    # 1. Mavjud ma'lumot qatorlarini yangilaymiz
+    if valid_rows:
+        ws.update(
+            f"A2:H{total_valid + 1}",
+            valid_rows,
+            value_input_option="RAW"
+        )
+
+    # 2. Ortiqcha qatorlarni tozalaymiz (bo'sh qilish)
+    if total_existing > total_valid + 1:
+        empty_rows = [[""] * 8 for _ in range(total_existing - total_valid - 1)]
+        ws.update(
+            f"A{total_valid + 2}:H{total_existing}",
+            empty_rows,
+            value_input_option="RAW"
+        )
+
+
 def _find_user_row_sync(user_id: int) -> int | None:
     """Foydalanuvchi qatorini topadi (1-based), yo'q bo'lsa None"""
     ws = get_users_sheet()
-    telegram_ids = ws.col_values(2)  # 2-ustun: Telegram ID
+    telegram_ids = ws.col_values(2)
     for i, val in enumerate(telegram_ids, start=1):
         if str(val).strip() == str(user_id):
             return i
     return None
-
-
-def _find_first_empty_row_sync() -> int:
-    """
-    Bo'sh qatorlarni topib qaytaradi.
-    Agar sarlavhadan keyin bo'sh qator bo'lsa — o'sha qatorni ishlatadi.
-    Aks holda oxiridan keyin yangi qator qo'shadi.
-    """
-    ws = get_users_sheet()
-    all_values = ws.get_all_values()
-    # Sarlavhadan keyingi qatorlarni ko'rib chiqamiz
-    for i, row in enumerate(all_values[1:], start=2):  # 2-qatordan boshlaymiz
-        # Qator bo'shmi? (Telegram ID ustuni bo'sh)
-        if not str(row[1]).strip() if len(row) > 1 else True:
-            return i
-    # Bo'sh qator yo'q — oxiridan keyin qo'shamiz
-    return len(all_values) + 1
-
 
 
 def _user_has_phone_sync(user_id: int) -> bool:
@@ -101,7 +134,7 @@ def _user_has_phone_sync(user_id: int) -> bool:
     telegram_ids = ws.col_values(2)
     for i, val in enumerate(telegram_ids, start=1):
         if str(val).strip() == str(user_id):
-            phone = ws.cell(i, 6).value  # 6-ustun: Telefon raqami
+            phone = ws.cell(i, 6).value
             return bool(phone and str(phone).strip())
     return False
 
@@ -115,34 +148,53 @@ def _save_user_sync(
 ) -> None:
     ws = get_users_sheet()
     sana = datetime.now().strftime("%Y-%m-%d %H:%M")
+    uname = f"@{username}" if username else ""
 
     row_idx = _find_user_row_sync(user_id)
 
     if row_idx is not None:
-        # Foydalanuvchi bor — faqat telefon yangilаymiz (bo'sh bo'lsa)
+        # Mavjud foydalanuvchi — username/ism/familiya yangilaymiz
+        # Telegram ID hech qachon o'zgarmaydi
+        ws.update_cell(row_idx, 3, uname)
+        ws.update_cell(row_idx, 4, first_name)
+        ws.update_cell(row_idx, 5, last_name)
         if phone:
-            existing_phone = ws.cell(row_idx, 6).value
-            if not existing_phone:
-                ws.update_cell(row_idx, 6, phone)
+            ws.update_cell(row_idx, 6, phone)
     else:
-        # Bo'sh qator bormi? — o'shanga yozamiz
-        empty_row = _find_first_empty_row_sync()
+        # Yangi foydalanuvchi:
+        # 1. Avval tozalaymiz (bo'sh qatorlar o'chadi, T/r tartiblanadi)
+        # 2. Keyin T/r ni aniqlaymiz
+        # 3. Oxiriga qo'shamiz
+        _cleanup_sheet_sync()
 
-        # T/r — varaqda mavjud eng katta raqam + 1
-        tr_vals = [v for v in ws.col_values(1)[1:] if str(v).strip().isdigit()]
-        tr = max((int(v) for v in tr_vals), default=0) + 1
+        # Tozalanganidan keyin hozirgi faol qatorlar sonini olamiz
+        all_vals = ws.get_all_values()
+        valid_count = sum(
+            1 for r in all_vals[1:]
+            if len(r) > 1 and str(r[1]).strip()
+        )
+        tr = valid_count + 1
 
-        row = [
+        new_row = [
             str(tr),
             str(user_id),
-            f"@{username}" if username else "",
+            uname,
             first_name or "",
             last_name or "",
             phone or "",
             sana,
             "Faol",
         ]
-        ws.update(f"A{empty_row}:H{empty_row}", [row])
+        ws.append_row(new_row, value_input_option="RAW")
+
+
+async def cleanup_sheet() -> None:
+    """Varaqni tozalaydi: bo'sh qatorlarni o'chiradi, T/r ni tartiblab qayta yozadi"""
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _cleanup_sheet_sync)
+    except Exception as e:
+        logger.error(f"Varaqni tozalashda xato: {e}")
 
 
 async def save_user(
@@ -241,6 +293,16 @@ def collecting_kb() -> InlineKeyboardMarkup:
 
 
 # ===================== BROADCAST HANDLERLAR =====================
+
+@router.message(Command("cleanup_users"))
+async def cmd_cleanup_users(message: Message, state: FSMContext):
+    """Foydalanuvchilar varag'ini tozalaydi va T/r ni tartiblab qayta yozadi"""
+    if message.from_user.id != ADMIN_ID:
+        return
+    msg = await message.answer("⏳ Varaq tozalanmoqda...")
+    await cleanup_sheet()
+    await msg.edit_text("✅ Varaq tozalandi! Bo'sh qatorlar o'chirildi, T/r tartiblab qayta yozildi.")
+
 
 @router.message(Command("broadcast"))
 async def cmd_broadcast(message: Message, state: FSMContext):

@@ -13,11 +13,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.exceptions import TelegramConflictError
 from aiogram.client.session.aiohttp import AiohttpSession
-
-# MUHIM O'ZGARISH: Sinxron o'rniga asinxron kutubxona ishlatiladi
 from upstash_redis.asyncio import Redis
 
-# Routerlar (Sening o'zgarishsiz routerlaring)
 from start import router as start_router
 from contact import router as contact_router
 from kredit_turlari import router as kredit_router
@@ -36,6 +33,7 @@ from hamkor import router as hamkor_router
 from filial import router as filial_router
 from reklama_nazorati import router as reklama_router, setup_scheduler
 from broadcast import router as broadcast_router
+from download import router as download_router
 
 # =================== LOGGING ===================
 logging.basicConfig(
@@ -54,7 +52,6 @@ async def start_http_server() -> web.AppRunner:
     app = web.Application()
     app.router.add_get("/", _handle_root)
     app.router.add_get("/healthz", _handle_root)
-
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host="0.0.0.0", port=port)
@@ -63,7 +60,7 @@ async def start_http_server() -> web.AppRunner:
     return runner
 
 
-# =================== UPSTASH LOCK (ASINXRON) ===================
+# =================== UPSTASH LOCK ===================
 def build_redis() -> Redis:
     url = os.getenv("UPSTASH_REDIS_REST_URL")
     token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
@@ -73,7 +70,6 @@ def build_redis() -> Redis:
 
 async def acquire_lock(redis: Redis, key: str, value: str, ttl: int) -> bool:
     try:
-        # Await qo'shildi, loopni bloklamaydi
         result = await redis.set(key, value, ex=ttl, nx=True)
         return bool(result)
     except Exception as e:
@@ -89,12 +85,11 @@ async def refresh_lock_loop(redis: Redis, key: str, value: str, ttl: int):
             if isinstance(cur, bytes):
                 cur = cur.decode()
             if str(cur) != value:
-                raise RuntimeError(f"Lock boshqanikiga o'tdi yoki yo'qoldi: {cur} != {value}")
+                raise RuntimeError(f"Lock boshqanikiga o'tdi: {cur} != {value}")
             await redis.set(key, value, ex=ttl)
         except Exception as e:
             logger.error(f"Lock refresh xato: {e}")
-            # Xato bo'lsa instansiyani o'ldiramiz, platforma toza holatda qayta ko'taradi
-            sys.exit(1) 
+            sys.exit(1)
 
 
 # =================== DISPATCHER ===================
@@ -140,10 +135,23 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         session=AiohttpSession(timeout=60)
     )
-    await bot.delete_webhook(drop_pending_updates=True)
-    
+    # Telegram ulanish timeout bo'lsa — o'tkazib yuboramiz
+    for attempt in range(3):
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            break
+        except Exception as e:
+            logger.warning(f"delete_webhook urinish {attempt+1}/3: {e}")
+            if attempt < 2:
+                await asyncio.sleep(5)
+            else:
+                logger.warning("delete_webhook o'tkazib yuborildi, polling davom etadi")
+
     dp = setup_dispatcher()
-    await set_bot_commands(bot)
+    try:
+        await set_bot_commands(bot)
+    except Exception as e:
+        logger.warning(f"Buyruqlarni o'rnatishda xato: {e}")
 
     instance_id = (
         os.getenv("KOYEB_DEPLOYMENT_ID")
@@ -157,15 +165,13 @@ async def main():
         redis = build_redis()
     except Exception as e:
         logger.error(f"Upstash Redis ulanishida xato: {e}")
-        # Redis bo'lmasa instansiya ishlay olmaydi, abadiy kutish emas, xato bilan chiqamiz.
         sys.exit(1)
 
-    # 1. Takeover mexanizmi (Active Waiting)
     logger.info("Lock tekshirilmoqda...")
     got_lock = await acquire_lock(redis, lock_key, lock_value, ttl=60)
-    
+
     while not got_lock:
-        logger.warning("Lock band. Bu instance HTTP server sifatida ishlaydi. 15s dan keyin lock'ni qayta tekshiramiz...")
+        logger.warning("Lock band. 15s dan keyin qayta tekshiramiz...")
         await asyncio.sleep(15)
         got_lock = await acquire_lock(redis, lock_key, lock_value, ttl=60)
 
@@ -179,17 +185,19 @@ async def main():
     with suppress(Exception):
         scheduler = setup_scheduler(bot)
 
-    me = await bot.get_me()
-    logger.info(f"Bot ishga tushdi: @{me.username}")
+    try:
+        me = await bot.get_me()
+        logger.info(f"Bot ishga tushdi: @{me.username}")
+    except Exception as e:
+        logger.warning(f"get_me xato: {e}")
 
     try:
-        # 2. Aiogram o'zi network errorlarni hal qiladi, while True kerak emas
         await dp.start_polling(
             bot,
             allowed_updates=["message", "callback_query", "chat_member", "my_chat_member"]
         )
     except TelegramConflictError:
-        logger.critical("Konflikt! Lock mexanizmi ishlamadi, boshqa bot instansiyasi polling qilyapti. O'chirilmoqda...")
+        logger.critical("Konflikt! Boshqa bot instansiyasi polling qilyapti. O'chirilmoqda...")
         sys.exit(1)
     finally:
         lock_task.cancel()

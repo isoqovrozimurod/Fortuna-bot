@@ -147,9 +147,9 @@ def _register_user_sync(user_id: int, full_name: str, username: str) -> bool:
         # Bo'sh qator bormi? — o'shanga yozamiz (teshik qolmaydi)
         target_row = _find_first_empty_subadmin_row_sync()
 
-        # T/r — hozirgi faol qatorlar soni + 1
-        all_ids = [v for v in ws.col_values(2)[1:] if str(v).strip()]
-        tr = len(all_ids) + 1
+        # T/r — varaqda mavjud eng katta raqam + 1
+        tr_vals = [v for v in ws.col_values(1)[1:] if str(v).strip().isdigit()]
+        tr = max((int(v) for v in tr_vals), default=0) + 1
 
         row = [str(tr), str(user_id), uname, ism, familiya, "", sana, "Faol"]
         ws.update(f"A{target_row}:H{target_row}", [row])

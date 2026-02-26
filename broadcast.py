@@ -7,6 +7,7 @@ import re
 import base64
 import json
 from typing import Any
+from datetime import datetime
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
@@ -31,16 +32,18 @@ router = Router()
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 # ===================== SHEETS CONFIG =====================
-# Yozish uchun spreadsheets (readonly emas) scope kerak
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
 
 SPREADSHEET_ID = "1UU87w2q9zk8q5_3pQqfVhp0Zp2hnU70bWWgu1R9q3No"
-USERS_SHEET = "foydalanuvchilar"  # Yangi varaq nomi
+USERS_SHEET = "user"
 
 _gc: gspread.Client | None = None
+
+# Sarlavhalar tartibi
+HEADERS = ["user_id", "ism", "username", "telefon", "sana"]
 
 
 def get_sheets_client() -> gspread.Client:
@@ -56,52 +59,92 @@ def get_sheets_client() -> gspread.Client:
 
 
 def get_users_sheet() -> gspread.Worksheet:
-    """
-    'foydalanuvchilar' varag'ini qaytaradi.
-    Agar mavjud bo'lmasa — avtomatik yaratadi.
-    """
     gc = get_sheets_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
-
-    try:
-        ws = sh.worksheet(USERS_SHEET)
-    except gspread.WorksheetNotFound:
-        # Varaq yo'q — yaratamiz
-        ws = sh.add_worksheet(title=USERS_SHEET, rows=10000, cols=3)
-        ws.append_row(["user_id", "sana", "username"])
-        logger.info(f"'{USERS_SHEET}' varag'i yaratildi")
-
+    ws = sh.worksheet(USERS_SHEET)
+    # Sarlavha yo'q bo'lsa — qo'shamiz
+    if not ws.row_values(1):
+        ws.append_row(HEADERS)
     return ws
 
 
-# ===================== USER SAQLASH =====================
+# ===================== USER OPERATSIYALARI =====================
 
-async def save_user(user_id: int, username: str = "") -> None:
-    """
-    Foydalanuvchi ID sini Sheets'ga saqlaydi.
-    Agar allaqachon mavjud bo'lsa — qo'shmaydi.
-    """
+def _user_exists_sync(user_id: int) -> bool:
+    """Foydalanuvchi allaqachon bormi?"""
+    ws = get_users_sheet()
+    existing = ws.col_values(1)
+    return str(user_id) in existing
+
+
+def _save_user_sync(
+    user_id: int,
+    full_name: str = "",
+    username: str = "",
+    phone: str = "",
+) -> None:
+    ws = get_users_sheet()
+    existing = ws.col_values(1)
+
+    sana = datetime.now().strftime("%Y-%m-%d %H:%M")
+    row = [
+        str(user_id),
+        full_name or "",
+        f"@{username}" if username else "",
+        phone or "",
+        sana,
+    ]
+
+    if str(user_id) in existing:
+        # Foydalanuvchi bor — faqat telefon bo'sh bo'lsa yangilaymiz
+        if phone:
+            cell = None
+            for i, v in enumerate(existing, start=1):
+                if v == str(user_id):
+                    cell = i
+                    break
+            if cell:
+                ws.update_cell(cell, 4, phone)  # 4-ustun: telefon
+    else:
+        # Yangi foydalanuvchi
+        ws.append_row(row)
+
+
+async def save_user(
+    user_id: int,
+    full_name: str = "",
+    username: str = "",
+    phone: str = "",
+) -> None:
     try:
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _save_user_sync, user_id, username)
+        await loop.run_in_executor(
+            None, _save_user_sync, user_id, full_name, username, phone
+        )
     except Exception as e:
         logger.warning(f"Foydalanuvchi saqlashda xato: {e}")
 
 
-def _save_user_sync(user_id: int, username: str = "") -> None:
+async def user_has_phone(user_id: int) -> bool:
+    """Foydalanuvchining telefon raqami saqlanganmi?"""
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _user_has_phone_sync, user_id)
+    except Exception:
+        return False
+
+
+def _user_has_phone_sync(user_id: int) -> bool:
     ws = get_users_sheet()
-    existing = ws.col_values(1)  # 1-ustun: user_id lar
-
-    if str(user_id) in existing:
-        return  # Allaqachon bor
-
-    from datetime import datetime
-    sana = datetime.now().strftime("%Y-%m-%d %H:%M")
-    ws.append_row([str(user_id), sana, username or ""])
+    existing = ws.col_values(1)
+    if str(user_id) not in existing:
+        return False
+    idx = existing.index(str(user_id)) + 1  # 1-based
+    phone_val = ws.cell(idx, 4).value  # 4-ustun: telefon
+    return bool(phone_val and str(phone_val).strip())
 
 
 async def get_all_users() -> list[int]:
-    """Barcha foydalanuvchi IDlarini qaytaradi"""
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _get_all_users_sync)
@@ -112,14 +155,13 @@ async def get_all_users() -> list[int]:
 
 def _get_all_users_sync() -> list[int]:
     ws = get_users_sheet()
-    values = ws.col_values(1)[1:]  # 1-qator sarlavha, o'tkazib yuborish
+    values = ws.col_values(1)[1:]  # 1-qator sarlavha
     result = []
     for v in values:
         try:
             result.append(int(v))
         except (ValueError, TypeError):
             continue
-    # Dublikatlarni olib tashlash
     return list(set(result))
 
 
@@ -131,28 +173,13 @@ async def get_user_count() -> int:
 # ===================== TELEGRAM POST LINK PARSER =====================
 
 def parse_tg_link(text: str) -> tuple[str | int | None, int | None]:
-    """
-    Telegram post linkidan chat va message_id ni ajratadi.
-    Formatlar:
-      https://t.me/channel/123
-      https://t.me/c/1234567890/123  (yopiq kanal)
-    """
     text = text.strip()
-
-    # Yopiq kanal: t.me/c/CHAT_ID/MSG_ID
     m = re.search(r"t\.me/c/(\d+)/(\d+)", text)
     if m:
-        chat_id = int("-100" + m.group(1))
-        msg_id = int(m.group(2))
-        return chat_id, msg_id
-
-    # Ochiq kanal: t.me/CHANNEL/MSG_ID
+        return int("-100" + m.group(1)), int(m.group(2))
     m = re.search(r"t\.me/([A-Za-z0-9_]+)/(\d+)", text)
     if m:
-        chat_username = "@" + m.group(1)
-        msg_id = int(m.group(2))
-        return chat_username, msg_id
-
+        return "@" + m.group(1), int(m.group(2))
     return None, None
 
 
@@ -182,7 +209,7 @@ def collecting_kb() -> InlineKeyboardMarkup:
     ])
 
 
-# ===================== HANDLERLAR =====================
+# ===================== BROADCAST HANDLERLAR =====================
 
 @router.message(Command("broadcast"))
 async def cmd_broadcast(message: Message, state: FSMContext):
@@ -212,19 +239,16 @@ async def cmd_broadcast(message: Message, state: FSMContext):
 async def collect_content(message: Message, state: FSMContext):
     data = await state.get_data()
     items: list[dict] = data.get("items", [])
-
     item: dict[str, Any] = {}
 
     if message.photo:
         item["type"] = "photo"
         item["file_id"] = message.photo[-1].file_id
         item["caption"] = message.caption or ""
-
     elif message.location:
         item["type"] = "location"
         item["latitude"] = message.location.latitude
         item["longitude"] = message.location.longitude
-
     elif message.text:
         chat_id, msg_id = parse_tg_link(message.text)
         if chat_id and msg_id:
@@ -247,9 +271,9 @@ async def collect_content(message: Message, state: FSMContext):
         "location": "📍 Lokatsiya",
         "forward": "🔗 Post",
     }
-    added = type_names.get(item["type"], item["type"])
     await message.answer(
-        f"✅ {added} qo'shildi. Jami: <b>{len(items)}</b> ta.\n\n"
+        f"✅ {type_names.get(item['type'], item['type'])} qo'shildi. "
+        f"Jami: <b>{len(items)}</b> ta.\n\n"
         f"Yana qo'shishingiz yoki tayyor tugmasini bosishingiz mumkin.",
         reply_markup=collecting_kb(),
         parse_mode="HTML",
@@ -266,11 +290,7 @@ async def preview_broadcast(call: CallbackQuery, state: FSMContext, bot: Bot):
         return
 
     await call.answer()
-    await call.message.edit_text(
-        "👁 <b>Ko'rib chiqish (faqat sizga):</b>",
-        parse_mode="HTML",
-    )
-
+    await call.message.edit_text("👁 <b>Ko'rib chiqish (faqat sizga):</b>", parse_mode="HTML")
     await _send_items(bot, call.from_user.id, items, is_preview=True)
 
     count = await get_user_count()
@@ -300,9 +320,7 @@ async def send_broadcast(call: CallbackQuery, state: FSMContext, bot: Bot):
         return
 
     await call.answer()
-    status_msg = await call.message.edit_text(
-        f"⏳ Yuborilmoqda... 0 / {len(users)}",
-    )
+    status_msg = await call.message.edit_text(f"⏳ Yuborilmoqda... 0 / {len(users)}")
 
     success = 0
     failed = 0
@@ -323,7 +341,7 @@ async def send_broadcast(call: CallbackQuery, state: FSMContext, bot: Bot):
             except Exception:
                 pass
 
-        await asyncio.sleep(0.05)  # Telegram flood limit
+        await asyncio.sleep(0.05)
 
     await status_msg.edit_text(
         f"✅ <b>Yuborildi!</b>\n\n"
@@ -343,23 +361,22 @@ async def cancel_broadcast(call: CallbackQuery, state: FSMContext):
 
 # ===================== YUBORISH FUNKSIYASI =====================
 
-async def _send_items(bot: Bot, user_id: int, items: list[dict], is_preview: bool = False) -> None:
+async def _send_items(
+    bot: Bot, user_id: int, items: list[dict], is_preview: bool = False
+) -> None:
     for item in items:
         t = item["type"]
 
         if t == "text":
             await bot.send_message(user_id, item["text"])
-
         elif t == "photo":
             await bot.send_photo(
                 user_id,
                 item["file_id"],
                 caption=item.get("caption") or None,
             )
-
         elif t == "location":
             await bot.send_location(user_id, item["latitude"], item["longitude"])
-
         elif t == "forward":
             try:
                 await bot.forward_message(

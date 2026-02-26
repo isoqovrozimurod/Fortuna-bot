@@ -73,16 +73,34 @@ def _find_user_row_sync(user_id: int) -> int | None:
     ws = get_users_sheet()
     telegram_ids = ws.col_values(2)  # 2-ustun: Telegram ID
     for i, val in enumerate(telegram_ids, start=1):
-        if str(val) == str(user_id):
+        if str(val).strip() == str(user_id):
             return i
     return None
+
+
+def _find_first_empty_row_sync() -> int:
+    """
+    Bo'sh qatorlarni topib qaytaradi.
+    Agar sarlavhadan keyin bo'sh qator bo'lsa — o'sha qatorni ishlatadi.
+    Aks holda oxiridan keyin yangi qator qo'shadi.
+    """
+    ws = get_users_sheet()
+    all_values = ws.get_all_values()
+    # Sarlavhadan keyingi qatorlarni ko'rib chiqamiz
+    for i, row in enumerate(all_values[1:], start=2):  # 2-qatordan boshlaymiz
+        # Qator bo'shmi? (Telegram ID ustuni bo'sh)
+        if not str(row[1]).strip() if len(row) > 1 else True:
+            return i
+    # Bo'sh qator yo'q — oxiridan keyin qo'shamiz
+    return len(all_values) + 1
+
 
 
 def _user_has_phone_sync(user_id: int) -> bool:
     ws = get_users_sheet()
     telegram_ids = ws.col_values(2)
     for i, val in enumerate(telegram_ids, start=1):
-        if str(val) == str(user_id):
+        if str(val).strip() == str(user_id):
             phone = ws.cell(i, 6).value  # 6-ustun: Telefon raqami
             return bool(phone and str(phone).strip())
     return False
@@ -107,9 +125,12 @@ def _save_user_sync(
             if not existing_phone:
                 ws.update_cell(row_idx, 6, phone)
     else:
-        # Yangi foydalanuvchi — T/r hisoblaymiz
-        all_rows = ws.get_all_values()
-        tr = len(all_rows)  # Sarlavha + mavjud qatorlar soni
+        # Bo'sh qator bormi? — o'shanga yozamiz
+        empty_row = _find_first_empty_row_sync()
+
+        # T/r — hozirgi faol foydalanuvchilar soni + 1
+        all_ids = [v for v in ws.col_values(2)[1:] if str(v).strip()]
+        tr = len(all_ids) + 1
 
         row = [
             str(tr),
@@ -121,7 +142,7 @@ def _save_user_sync(
             sana,
             "Faol",
         ]
-        ws.append_row(row)
+        ws.update(f"A{empty_row}:H{empty_row}", [row])
 
 
 async def save_user(

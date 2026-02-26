@@ -25,3 +25,5 @@ geopy==2.4.1
 
 # Optional (faqat ishlatsang qolsin)
 matplotlib==3.8.4
+
+openpyxl

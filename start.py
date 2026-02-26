@@ -7,9 +7,18 @@ from pathlib import Path
 from aiogram import Router, Bot, types, F
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import (
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardRemove,
+    FSInputFile,
+)
 
-from broadcast import save_user
+from broadcast import save_user, user_has_phone
 
 router = Router()
 
@@ -17,9 +26,15 @@ TEMP_DIR = Path(__file__).resolve().parent / "temp"
 PROMO_IMAGE = TEMP_DIR / "fortuna.jpg"
 
 
+# ===================== FSM =====================
+
+class StartFSM(StatesGroup):
+    waiting_phone = State()
+
+
 # ================= UI =================
 
-def main_menu_markup():
+def main_menu_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -28,12 +43,22 @@ def main_menu_markup():
             ],
             [
                 InlineKeyboardButton(text="📍 Filiallar", callback_data="branches"),
-            ]
+            ],
         ]
     )
 
 
-def promo_caption():
+def phone_request_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📱 Telefon raqamni ulashish", request_contact=True)],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def promo_caption() -> str:
     return (
         "<b>✅FORTUNA BIZNES ENDI G'ALLAOROLDA</b>\n\n"
         "💸SIZGA PUL KERAKMI? MUAMMOSIZ, 2 SOATDA NAQD PULDA KREDIT OLING\n\n"
@@ -53,32 +78,79 @@ def promo_caption():
 
 # ================= PROMO =================
 
-async def send_promo(bot: Bot, user_id: int):
+async def send_promo(bot: Bot, user_id: int) -> None:
     if PROMO_IMAGE.exists():
         await bot.send_photo(
             user_id,
             FSInputFile(PROMO_IMAGE),
             caption=promo_caption(),
             reply_markup=main_menu_markup(),
-            parse_mode=ParseMode.HTML
+            parse_mode=ParseMode.HTML,
         )
     else:
         await bot.send_message(
             user_id,
             promo_caption(),
             reply_markup=main_menu_markup(),
-            parse_mode=ParseMode.HTML
+            parse_mode=ParseMode.HTML,
         )
 
 
 # ================= /start =================
 
 @router.message(Command("start"))
-async def cmd_start(message: types.Message, bot: Bot):
-    username = message.from_user.username or ""
-    # Foydalanuvchini Sheets'ga saqlaymiz (xato bo'lsa bot to'xtamaydi)
-    asyncio.ensure_future(save_user(message.from_user.id, username))
-    await send_promo(bot, message.from_user.id)
+async def cmd_start(message: types.Message, bot: Bot, state: FSMContext):
+    user = message.from_user
+
+    # Avval foydalanuvchini ismini saqlаymiz (telefonsiz)
+    asyncio.ensure_future(
+        save_user(
+            user_id=user.id,
+            full_name=user.full_name or "",
+            username=user.username or "",
+        )
+    )
+
+    # Telefon raqami allaqachon bormi?
+    has_phone = await user_has_phone(user.id)
+
+    if has_phone:
+        # Telefon bor — darhol menyu
+        await send_promo(bot, user.id)
+    else:
+        # Telefon yo'q — so'raymiz
+        await state.set_state(StartFSM.waiting_phone)
+        await message.answer(
+            "👋 Xush kelibsiz!\n\n"
+            "Botdan foydalanish uchun telefon raqamingizni ulashing.\n"
+            "Bu ma'lumot faqat biz bilan bog'lanish uchun ishlatiladi.",
+            reply_markup=phone_request_kb(),
+        )
+
+
+# ================= TELEFON QABUL QILISH =================
+
+@router.message(StartFSM.waiting_phone, F.contact)
+async def handle_phone(message: types.Message, bot: Bot, state: FSMContext):
+    await state.clear()
+    user = message.from_user
+    phone = message.contact.phone_number
+
+    asyncio.ensure_future(
+        save_user(
+            user_id=user.id,
+            full_name=user.full_name or "",
+            username=user.username or "",
+            phone=phone,
+        )
+    )
+
+    await message.answer(
+        "✅ Rahmat! Ma'lumotlaringiz saqlandi.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    await send_promo(bot, user.id)
+
 
 
 # ================= Ortga =================

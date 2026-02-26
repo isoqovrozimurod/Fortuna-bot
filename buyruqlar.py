@@ -34,6 +34,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="job",         description="Vakansiya qo'shish"),
         BotCommand(command="chanel",      description="Majburiy obuna qo'shish"),
         BotCommand(command="broadcast",   description="Ommaviy xabar yuborish"),
+        BotCommand(command="cleanup_users", description="Foydalanuvchilar jadvalini tozalash"),
         BotCommand(command="filiallar",   description="Filiallar ro'yxati"),
         BotCommand(command="refresh_branches", description="Filiallarni yangilash"),
     ]

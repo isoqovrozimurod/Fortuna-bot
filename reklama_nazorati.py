@@ -1,16 +1,20 @@
 """
-Reklama Nazorat Tizimi - Upstash Redis versiya
+Reklama Nazorat Tizimi - Google Sheets versiyasi
 Har kuni 09:30 va 15:00 da screenshot tekshirish
-Ma'lumotlar Upstash Redis da saqlanadi (deploy da o'chmaydi)
+Sub-adminlar ma'lumotlari Google Sheets "Sub-adminlar" varag'ida saqlanadi
 """
 
 import os
+import base64
 import json
 import asyncio
 import logging
 import contextlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+import gspread
+from google.oauth2.service_account import Credentials
 
 from aiogram import Router, Bot, F
 from aiogram.types import (
@@ -24,7 +28,6 @@ from aiogram.filters import ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER, C
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from upstash_redis import Redis
 
 # =================== SOZLAMALAR ===================
 
@@ -45,64 +48,143 @@ try:
 except (ValueError, TypeError):
     GROUP_ID = 0
     ADMIN_ID = 0
-    logger.error("❌ GROUP_ID yoki ADMIN_ID noto'g'ri formatda!")
 
 CHANNEL_LINK = "https://t.me/FORTUNABIZNES_GALLAOROL"
+SPREADSHEET_ID = "1UU87w2q9zk8q5_3pQqfVhp0Zp2hnU70bWWgu1R9q3No"
+SUBADMIN_SHEET = "Sub-adminlar"
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
 
-UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL")
-UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
-if not UPSTASH_URL or not UPSTASH_TOKEN:
-    logger.error("❌ UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN topilmadi!")
-
-redis = Redis(url=UPSTASH_URL, token=UPSTASH_TOKEN)
-
-# Scheduler global saqlansin (GC bo'lib ketmasin)
 SCHEDULER: AsyncIOScheduler | None = None
 
-# =================== REDIS YORDAMCHI FUNKSIYALAR ===================
+# Screenshot kunlik hisob — xotirada saqlanadi (restart da tozalanadi, lekin yetarli)
+_screenshots: dict[int, dict] = {}  # {user_id: {"date": "2026-02-26", "count": 2}}
 
-def _to_obj(val):
-    if val is None:
-        return None
-    if isinstance(val, (dict, list)):
-        return val
-    if isinstance(val, bytes):
-        val = val.decode("utf-8", errors="ignore")
-    if isinstance(val, str):
-        try:
-            return json.loads(val)
-        except Exception:
-            return val
-    return val
 
-def redis_get(key: str):
-    try:
-        return _to_obj(redis.get(key))
-    except Exception as e:
-        logger.error(f"Redis get xato ({key}): {e}")
-        return None
+# =================== SHEETS =====================
 
-def redis_set(key: str, value) -> bool:
-    try:
-        redis.set(key, json.dumps(value, ensure_ascii=False))
+_gc: gspread.Client | None = None
+
+def get_sheets_client() -> gspread.Client:
+    global _gc
+    if _gc is None:
+        b64 = os.getenv("GOOGLE_CREDENTIALS_B64")
+        if not b64:
+            raise RuntimeError("GOOGLE_CREDENTIALS_B64 topilmadi")
+        creds_dict = json.loads(base64.b64decode(b64).decode("utf-8"))
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        _gc = gspread.authorize(creds)
+    return _gc
+
+
+def get_subadmin_sheet() -> gspread.Worksheet:
+    gc = get_sheets_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet(SUBADMIN_SHEET)
+    if not ws.row_values(1):
+        ws.append_row(["T/r", "Telegram ID", "Username", "Ism", "Familiya",
+                        "Telefon raqami", "Qo'shilgan sana", "Holati"])
+    return ws
+
+
+def _find_row(user_id: int) -> int | None:
+    """Foydalanuvchi qatorini topadi (1-based), yo'q bo'lsa None"""
+    ws = get_subadmin_sheet()
+    ids = ws.col_values(2)  # Telegram ID ustuni
+    for i, val in enumerate(ids, start=1):
+        if str(val) == str(user_id):
+            return i
+    return None
+
+
+def _register_user_sync(user_id: int, full_name: str, username: str) -> bool:
+    """True = yangi, False = mavjud edi"""
+    ws = get_subadmin_sheet()
+    row_idx = None
+    ids = ws.col_values(2)
+    for i, val in enumerate(ids, start=1):
+        if str(val) == str(user_id):
+            row_idx = i
+            break
+
+    parts = (full_name or "").split(" ", 1)
+    ism = parts[0]
+    familiya = parts[1] if len(parts) > 1 else ""
+    uname = f"@{username}" if username else ""
+    sana = now_tz().strftime("%Y-%m-%d %H:%M")
+
+    if row_idx is None:
+        # Yangi qator
+        all_rows = ws.get_all_values()
+        tr = len(all_rows)  # sarlavha + mavjud qatorlar
+        ws.append_row([str(tr), str(user_id), uname, ism, familiya, "", sana, "Faol"])
         return True
-    except Exception as e:
-        logger.error(f"Redis set xato ({key}): {e}")
+    else:
+        # Mavjud — username va ismni yangilaymiz
+        ws.update_cell(row_idx, 3, uname)
+        ws.update_cell(row_idx, 4, ism)
+        ws.update_cell(row_idx, 5, familiya)
+        ws.update_cell(row_idx, 8, "Faol")
         return False
 
-def get_all_user_ids() -> list[str]:
-    try:
-        obj = _to_obj(redis.get("user_ids"))
-        return obj if isinstance(obj, list) else []
-    except Exception as e:
-        logger.error(f"user_ids o'qishda xato: {e}")
-        return []
 
-def add_user_id(user_id: str):
-    ids = get_all_user_ids()
-    if user_id not in ids:
-        ids.append(user_id)
-        redis_set("user_ids", ids)
+def _set_status_sync(user_id: int, status: str):
+    row_idx = _find_row(user_id)
+    if row_idx:
+        ws = get_subadmin_sheet()
+        ws.update_cell(row_idx, 8, status)
+
+
+def _get_all_active_sync() -> list[dict]:
+    ws = get_subadmin_sheet()
+    records = ws.get_all_records()
+    result = []
+    for r in records:
+        if str(r.get("Holati", "")).strip() == "Faol":
+            result.append({
+                "id": str(r.get("Telegram ID", "")),
+                "name": f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip(),
+                "username": str(r.get("Username", "")),
+            })
+    return result
+
+
+async def register_user(user_id: int, full_name: str, username: str) -> bool:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _register_user_sync, user_id, full_name, username)
+
+
+async def set_status(user_id: int, status: str):
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _set_status_sync, user_id, status)
+
+
+async def get_all_active() -> list[dict]:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _get_all_active_sync)
+
+
+# =================== SCREENSHOT HISOB ===================
+
+def get_screenshot_count(user_id: int) -> int:
+    data = _screenshots.get(user_id)
+    if not data or data.get("date") != today_str():
+        return 0
+    return data.get("count", 0)
+
+
+def increment_screenshot(user_id: int) -> int:
+    today = today_str()
+    data = _screenshots.get(user_id, {})
+    if data.get("date") != today:
+        _screenshots[user_id] = {"date": today, "count": 1}
+        return 1
+    data["count"] = data.get("count", 0) + 1
+    _screenshots[user_id] = data
+    return data["count"]
+
 
 # =================== ADMIN TEKSHIRUVI ===================
 
@@ -115,69 +197,6 @@ def is_admin_in_group(message: Message) -> bool:
         and GROUP_ID != 0
     )
 
-# =================== FOYDALANUVCHI BOSHQARUVI ===================
-
-def register_user_in_db(user) -> bool:
-    """
-    Foydalanuvchini bazaga qo'shish/yangilash
-    Returns: True - yangi, False - mavjud
-    """
-    user_id = str(user.id)
-    today = today_str()
-    key = f"user:{user_id}"
-    existing = redis_get(key)
-
-    if existing is None or not isinstance(existing, dict):
-        redis_set(key, {
-            "fullname": user.full_name,
-            "username": user.username or "mavjud_emas",
-            "registered_at": today,
-            "status": "active",
-            "last_seen": today,
-        })
-        add_user_id(user_id)
-        logger.info(f"✅ Yangi foydalanuvchi: {user.full_name} (ID: {user_id})")
-        return True
-
-    # Qaytgan userni ham active qilamiz
-    existing["fullname"] = user.full_name
-    existing["username"] = user.username or "mavjud_emas"
-    existing["last_seen"] = today
-    existing["status"] = "active"
-    existing.pop("left_date", None)
-    redis_set(key, existing)
-    return False
-
-def get_user(user_id: str):
-    obj = redis_get(f"user:{user_id}")
-    return obj if isinstance(obj, dict) else None
-
-def set_user_status(user_id: str, status: str):
-    user = get_user(user_id)
-    if user:
-        user["status"] = status
-        if status == "left":
-            user["left_date"] = today_str()
-        redis_set(f"user:{user_id}", user)
-
-def get_screenshot_count(user_id: str) -> int:
-    data = redis_get(f"screenshot:{user_id}")
-    if not isinstance(data, dict):
-        return 0
-    if data.get("date") != today_str():
-        return 0
-    return int(data.get("count", 0) or 0)
-
-def increment_screenshot(user_id: str) -> int:
-    today = today_str()
-    key = f"screenshot:{user_id}"
-    data = redis_get(key)
-    if not isinstance(data, dict) or data.get("date") != today:
-        redis_set(key, {"date": today, "count": 1})
-        return 1
-    new_count = int(data.get("count", 0) or 0) + 1
-    redis_set(key, {"date": today, "count": new_count})
-    return new_count
 
 # =================== RO'YXATDAN O'TKAZISH ===================
 
@@ -209,11 +228,16 @@ async def start_registration_process(message: Message):
 @router.callback_query(F.data == "register_me")
 async def process_registration(callback: CallbackQuery):
     user = callback.from_user
-    is_new = register_user_in_db(user)
-    await callback.answer(
-        "✅ Siz ro'yxatga olindingiz! Rahmat." if is_new else "✅ Ma'lumotlar yangilandi! Rahmat.",
-        show_alert=is_new
-    )
+    try:
+        is_new = await register_user(user.id, user.full_name or "", user.username or "")
+        await callback.answer(
+            "✅ Siz ro'yxatga olindingiz! Rahmat." if is_new else "✅ Ma'lumotlar yangilandi!",
+            show_alert=is_new
+        )
+    except Exception as e:
+        logger.error(f"Ro'yxatdan o'tkazishda xato: {e}")
+        await callback.answer("❌ Xato yuz berdi, qayta urinib ko'ring.", show_alert=True)
+
 
 # =================== AVTOMATIK TUTIB OLISH ===================
 
@@ -222,8 +246,13 @@ async def user_joined(event: ChatMemberUpdated):
     if event.chat.id != GROUP_ID:
         return
     user = event.new_chat_member.user
-    register_user_in_db(user)
-    logger.info(f"👋 Guruhga qo'shildi: {user.full_name}")
+    if user.is_bot:
+        return
+    try:
+        await register_user(user.id, user.full_name or "", user.username or "")
+        logger.info(f"Guruhga qo'shildi: {user.full_name}")
+    except Exception as e:
+        logger.error(f"Guruhga qo'shilganda xato: {e}")
 
 
 @router.chat_member(ChatMemberUpdatedFilter(IS_MEMBER >> IS_NOT_MEMBER))
@@ -231,24 +260,38 @@ async def user_left(event: ChatMemberUpdated):
     if event.chat.id != GROUP_ID:
         return
     user = event.new_chat_member.user
-    set_user_status(str(user.id), "left")
-    logger.info(f"👋 Guruhdan chiqdi: {user.full_name}")
+    if user.is_bot:
+        return
+    try:
+        await set_status(user.id, "Chiqib ketdi")
+        logger.info(f"Guruhdan chiqdi: {user.full_name}")
+    except Exception as e:
+        logger.error(f"Chiqib ketganda xato: {e}")
 
 
-# FIX: ~F.photo va ~F.document — foto/document handlerlarni bloklamaslik uchun
 @router.message(F.chat.id == GROUP_ID, ~F.photo, ~F.document)
 async def capture_any_activity(message: Message):
-    """Guruhdagi matn/boshqa xabarlar orqali userni ro'yxatga olish"""
     if not message.from_user or message.from_user.is_bot:
         return
-    register_user_in_db(message.from_user)
+    try:
+        await register_user(
+            message.from_user.id,
+            message.from_user.full_name or "",
+            message.from_user.username or ""
+        )
+    except Exception as e:
+        logger.warning(f"Faollik saqlashda xato: {e}")
+
 
 # =================== SCREENSHOT QABUL QILISH ===================
 
 async def _handle_screenshot(message: Message, user):
-    user_id = str(user.id)
-    register_user_in_db(user)
-    count = increment_screenshot(user_id)
+    try:
+        await register_user(user.id, user.full_name or "", user.username or "")
+    except Exception:
+        pass
+
+    count = increment_screenshot(user.id)
 
     if count == 1:
         emoji, status = "📸", "Birinchi screenshot qabul qilindi!"
@@ -257,14 +300,14 @@ async def _handle_screenshot(message: Message, user):
     else:
         emoji, status = "🎉", f"Zo'r! {count}-screenshot qabul qilindi!"
 
-    response_text = (
-        f"{emoji} <b>Qabul qilindi!</b>\n"
-        f"👤 {user.full_name}\n"
-        f"📊 Bugungi natija: <b>{count}/2 screenshot</b>\n"
-        f"💬 {status}"
-    )
     with contextlib.suppress(Exception):
-        await message.reply(response_text, parse_mode="HTML")
+        await message.reply(
+            f"{emoji} <b>Qabul qilindi!</b>\n"
+            f"👤 {user.full_name}\n"
+            f"📊 Bugungi natija: <b>{count}/2 screenshot</b>\n"
+            f"💬 {status}",
+            parse_mode="HTML"
+        )
 
 
 @router.message(F.chat.id == GROUP_ID, F.photo)
@@ -277,7 +320,6 @@ async def photo_received(message: Message):
 
 @router.message(F.chat.id == GROUP_ID, F.document)
 async def document_received(message: Message):
-    """Screenshotni fayl qilib yuborishsa ham hisoblansin"""
     user = message.from_user
     if not user or user.is_bot:
         return
@@ -285,14 +327,15 @@ async def document_received(message: Message):
     if doc and doc.mime_type and doc.mime_type.startswith("image/"):
         await _handle_screenshot(message, user)
 
+
 # =================== NAZORAT HISOBOTI ===================
 
 def _mention_html(user_id: str, fullname: str) -> str:
-    safe_name = fullname.replace("<", "").replace(">", "")
-    return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+    safe = fullname.replace("<", "").replace(">", "")
+    return f'<a href="tg://user?id={user_id}">{safe}</a>'
+
 
 async def _send_long_html(bot: Bot, chat_id: int, text: str):
-    """4096 limitdan oshmasligi uchun bo'lib yuborish"""
     limit = 3800
     parts = []
     while len(text) > limit:
@@ -309,42 +352,36 @@ async def _send_long_html(bot: Bot, chat_id: int, text: str):
 
 async def check_screenshots(bot: Bot):
     if GROUP_ID == 0:
-        logger.error("❌ GROUP_ID sozlanmagan!")
+        logger.error("GROUP_ID sozlanmagan!")
         return
 
-    user_ids = get_all_user_ids()
-    total_users = 0
+    try:
+        active_users = await get_all_active()
+    except Exception as e:
+        logger.error(f"Foydalanuvchilarni olishda xato: {e}")
+        return
+
+    if not active_users:
+        logger.warning("Bazada faol foydalanuvchilar yo'q!")
+        return
+
     debtors = []
     completed = 0
 
-    for user_id in user_ids:
-        user_info = get_user(user_id)
-        if not user_info or user_info.get("status") != "active":
+    for u in active_users:
+        try:
+            uid = int(u["id"])
+        except (ValueError, TypeError):
             continue
-        total_users += 1
-        count = get_screenshot_count(user_id)
-        if count < 2:
-            debtors.append({
-                "id": user_id,
-                "name": user_info.get("fullname", "Noma'lum"),
-                "username": user_info.get("username", "mavjud_emas"),
-                "count": count,
-            })
-        else:
+        count = get_screenshot_count(uid)
+        if count >= 2:
             completed += 1
+        else:
+            debtors.append({**u, "count": count})
 
+    total = len(active_users)
     current_time = now_tz().strftime("%H:%M")
-
-    if total_users == 0:
-        logger.warning("⚠️ Bazada faol foydalanuvchilar yo'q!")
-        if ADMIN_ID:
-            with contextlib.suppress(Exception):
-                await bot.send_message(
-                    ADMIN_ID,
-                    "⚠️ Reklama nazorat bazasida faol user yo'q!\n"
-                    "/start_register buyrug'ini yuboring."
-                )
-        return
+    percent = int(completed / total * 100) if total > 0 else 0
 
     h, m = now_tz().hour, now_tz().minute
     if h < 9 or (h == 9 and m < 30):
@@ -357,17 +394,17 @@ async def check_screenshots(bot: Bot):
     if debtors:
         header = (
             f"🚨 <b>NAZORAT HISOBOTI ({current_time})</b>\n\n"
-            f"👥 Faol xodimlar: {total_users} ta\n"
+            f"👥 Faol xodimlar: {total} ta\n"
             f"✅ Bajarganlar: {completed} ta\n"
             f"❌ Bajarmaganlar: {len(debtors)} ta\n"
-            f"📊 Bajarilish: {int(completed / total_users * 100)}%\n\n"
+            f"📊 Bajarilish: {percent}%\n\n"
             "➖➖➖➖➖➖➖➖➖➖➖➖\n"
             "👇 <b>REKLAMA PLANINI BAJARMAGAN XODIMLAR:</b>\n\n"
         )
         lines = []
         for idx, u in enumerate(debtors, 1):
             mention = _mention_html(u["id"], u["name"])
-            uname = f" (@{u['username']})" if u["username"] != "mavjud_emas" else ""
+            uname = f" ({u['username']})" if u.get("username") else ""
             lines.append(
                 f"{idx}. {mention}{uname}\n"
                 f"   📸 Bugun: <b>{u['count']}/2</b> ❌\n"
@@ -381,22 +418,19 @@ async def check_screenshots(bot: Bot):
         )
         try:
             await _send_long_html(bot, GROUP_ID, header + "\n".join(lines) + footer)
-            logger.info(f"✅ Ogohlantirish yuborildi: {len(debtors)} ta qarzdor")
         except TelegramForbiddenError:
-            logger.error("❌ Botga guruhda yozish taqiqlangan!")
-        except TelegramBadRequest as e:
-            logger.error(f"❌ Xabar yuborishda xato: {e}")
+            logger.error("Botga guruhda yozish taqiqlangan!")
         except Exception as e:
-            logger.error(f"❌ Noma'lum xato: {e}")
+            logger.error(f"Hisobot yuborishda xato: {e}")
     else:
         with contextlib.suppress(Exception):
             await bot.send_message(
                 GROUP_ID,
                 f"🏆 <b>AJOYIB NATIJA! ({current_time})</b>\n\n"
                 "✅ <b>BARCHA XODIMLAR REJANI BAJARDI!</b>\n\n"
-                f"👥 Faol xodimlar: {total_users} ta\n"
+                f"👥 Faol xodimlar: {total} ta\n"
                 "📸 Hamma 2/2 screenshot yubordi\n"
-                "📊 Bajarilish: 100%\n\n"
+                f"📊 Bajarilish: 100%\n\n"
                 "👏 Hamma jamoaga rahmat!\n"
                 "💪 Shu tarzda davom eting!",
                 parse_mode="HTML"
@@ -407,19 +441,20 @@ async def check_screenshots(bot: Bot):
             await bot.send_message(
                 ADMIN_ID,
                 f"📊 <b>Admin statistika - {current_time}</b>\n\n"
-                f"👥 Jami faol: {total_users}\n"
+                f"👥 Jami faol: {total}\n"
                 f"✅ Bajargan: {completed}\n"
                 f"❌ Bajarmagan: {len(debtors)}\n"
-                f"📈 Foiz: {int(completed / total_users * 100)}%",
+                f"📈 Foiz: {percent}%",
                 parse_mode="HTML"
             )
+
 
 # =================== SCHEDULER ===================
 
 def setup_scheduler(bot: Bot):
     global SCHEDULER
     if GROUP_ID == 0:
-        logger.error("❌ GROUP_ID sozlanmagan! Scheduler ishga tushmaydi.")
+        logger.error("GROUP_ID sozlanmagan! Scheduler ishga tushmaydi.")
         return None
 
     scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
@@ -437,8 +472,9 @@ def setup_scheduler(bot: Bot):
     )
     scheduler.start()
     SCHEDULER = scheduler
-    logger.info("✅ Scheduler ishga tushdi (09:30, 15:00)")
+    logger.info("Scheduler ishga tushdi (09:30, 15:00)")
     return scheduler
+
 
 # =================== ADMIN BUYRUQLARI ===================
 
@@ -457,23 +493,24 @@ async def show_stats(message: Message):
     if not is_admin_in_group(message):
         return
 
-    user_ids = get_all_user_ids()
-    active_users = 0
-    completed = 0
-    for user_id in user_ids:
-        user_info = get_user(user_id)
-        if not user_info or user_info.get("status") != "active":
-            continue
-        active_users += 1
-        if get_screenshot_count(user_id) >= 2:
-            completed += 1
+    try:
+        active_users = await get_all_active()
+    except Exception as e:
+        await message.answer(f"❌ Xato: {e}")
+        return
+
+    total = len(active_users)
+    completed = sum(
+        1 for u in active_users
+        if get_screenshot_count(int(u["id"])) >= 2
+    )
 
     text = (
         f"📊 <b>Statistika - {now_tz().strftime('%d.%m.%Y %H:%M')}</b>\n\n"
-        f"👥 Faol foydalanuvchilar: {active_users}\n"
+        f"👥 Faol xodimlar: {total}\n"
         f"✅ Bugun bajarganlar: {completed}\n"
-        f"❌ Bajarmaganlar: {active_users - completed}\n"
-        f"📈 Bajarilish: {int(completed / active_users * 100) if active_users > 0 else 0}%"
+        f"❌ Bajarmaganlar: {total - completed}\n"
+        f"📈 Bajarilish: {int(completed / total * 100) if total > 0 else 0}%"
     )
     sent = await message.answer(text, parse_mode="HTML")
     with contextlib.suppress(Exception):
@@ -488,25 +525,30 @@ async def list_users(message: Message):
     if not is_admin_in_group(message):
         return
 
-    user_ids = get_all_user_ids()
-    active = [(uid, get_user(uid)) for uid in user_ids]
-    active = [(uid, u) for uid, u in active if u and u.get("status") == "active"]
+    try:
+        active_users = await get_all_active()
+    except Exception as e:
+        await message.answer(f"❌ Xato: {e}")
+        return
 
-    if not active:
+    if not active_users:
         await message.answer("❌ Faol foydalanuvchilar yo'q")
         return
 
-    text = "👥 <b>Faol foydalanuvchilar ro'yxati:</b>\n\n"
-    for user_id, user_info in active[:20]:
-        count = get_screenshot_count(user_id)
+    text = "👥 <b>Faol xodimlar ro'yxati:</b>\n\n"
+    for u in active_users[:25]:
+        try:
+            count = get_screenshot_count(int(u["id"]))
+        except Exception:
+            count = 0
         emoji = "✅" if count >= 2 else "⚠️"
-        uname = f"@{user_info['username']}" if user_info.get("username") != "mavjud_emas" else ""
+        uname = f" {u['username']}" if u.get("username") else ""
         text += (
-            f"{emoji} <b>{user_info['fullname']}</b> {uname}\n"
+            f"{emoji} <b>{u['name']}</b>{uname}\n"
             f"   📸 {count}/2 screenshot\n\n"
         )
-    if len(active) > 20:
-        text += f"\n<i>... va yana {len(active) - 20} ta foydalanuvchi</i>"
+    if len(active_users) > 25:
+        text += f"\n<i>... va yana {len(active_users) - 25} ta xodim</i>"
 
     sent = await message.answer(text, parse_mode="HTML")
     with contextlib.suppress(Exception):
@@ -530,8 +572,8 @@ async def help_command(message: Message):
         "<b>Admin buyruqlari (faqat guruhda):</b>\n"
         "/start_register — Barchani ro'yxatdan o'tkazish\n"
         "/reklama_tekshir — Qo'lda tekshirish\n"
-        "/reklama_stat — Statistika (30 soniya)\n"
-        "/reklama_users — Foydalanuvchilar ro'yxati\n"
+        "/reklama_stat — Statistika\n"
+        "/reklama_users — Xodimlar ro'yxati\n"
         "/reklama_help — Bu yordam\n\n"
         "<b>Avtomatik:</b>\n"
         "⏰ 09:30 — Ertalabki tekshiruv\n"

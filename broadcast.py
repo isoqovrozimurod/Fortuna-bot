@@ -40,10 +40,9 @@ SCOPES = [
 SPREADSHEET_ID = "1UU87w2q9zk8q5_3pQqfVhp0Zp2hnU70bWWgu1R9q3No"
 USERS_SHEET = "user"
 
-_gc: gspread.Client | None = None
+HEADERS = ["T/r", "Telegram ID", "Username", "Ism", "Familiya", "Telefon raqami", "Qo'shilgan sana", "Holati"]
 
-# Sarlavhalar tartibi
-HEADERS = ["user_id", "ism", "username", "telefon", "sana"]
+_gc: gspread.Client | None = None
 
 
 def get_sheets_client() -> gspread.Client:
@@ -62,7 +61,6 @@ def get_users_sheet() -> gspread.Worksheet:
     gc = get_sheets_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet(USERS_SHEET)
-    # Sarlavha yo'q bo'lsa — qo'shamiz
     if not ws.row_values(1):
         ws.append_row(HEADERS)
     return ws
@@ -70,43 +68,59 @@ def get_users_sheet() -> gspread.Worksheet:
 
 # ===================== USER OPERATSIYALARI =====================
 
-def _user_exists_sync(user_id: int) -> bool:
-    """Foydalanuvchi allaqachon bormi?"""
+def _find_user_row_sync(user_id: int) -> int | None:
+    """Foydalanuvchi qatorini topadi (1-based), yo'q bo'lsa None"""
     ws = get_users_sheet()
-    existing = ws.col_values(1)
-    return str(user_id) in existing
+    telegram_ids = ws.col_values(2)  # 2-ustun: Telegram ID
+    for i, val in enumerate(telegram_ids, start=1):
+        if str(val) == str(user_id):
+            return i
+    return None
+
+
+def _user_has_phone_sync(user_id: int) -> bool:
+    ws = get_users_sheet()
+    telegram_ids = ws.col_values(2)
+    for i, val in enumerate(telegram_ids, start=1):
+        if str(val) == str(user_id):
+            phone = ws.cell(i, 6).value  # 6-ustun: Telefon raqami
+            return bool(phone and str(phone).strip())
+    return False
 
 
 def _save_user_sync(
     user_id: int,
-    full_name: str = "",
+    first_name: str = "",
+    last_name: str = "",
     username: str = "",
     phone: str = "",
 ) -> None:
     ws = get_users_sheet()
-    existing = ws.col_values(1)
-
     sana = datetime.now().strftime("%Y-%m-%d %H:%M")
-    row = [
-        str(user_id),
-        full_name or "",
-        f"@{username}" if username else "",
-        phone or "",
-        sana,
-    ]
 
-    if str(user_id) in existing:
-        # Foydalanuvchi bor — faqat telefon bo'sh bo'lsa yangilaymiz
+    row_idx = _find_user_row_sync(user_id)
+
+    if row_idx is not None:
+        # Foydalanuvchi bor — faqat telefon yangilаymiz (bo'sh bo'lsa)
         if phone:
-            cell = None
-            for i, v in enumerate(existing, start=1):
-                if v == str(user_id):
-                    cell = i
-                    break
-            if cell:
-                ws.update_cell(cell, 4, phone)  # 4-ustun: telefon
+            existing_phone = ws.cell(row_idx, 6).value
+            if not existing_phone:
+                ws.update_cell(row_idx, 6, phone)
     else:
-        # Yangi foydalanuvchi
+        # Yangi foydalanuvchi — T/r hisoblaymiz
+        all_rows = ws.get_all_values()
+        tr = len(all_rows)  # Sarlavha + mavjud qatorlar soni
+
+        row = [
+            str(tr),
+            str(user_id),
+            f"@{username}" if username else "",
+            first_name or "",
+            last_name or "",
+            phone or "",
+            sana,
+            "Faol",
+        ]
         ws.append_row(row)
 
 
@@ -116,32 +130,28 @@ async def save_user(
     username: str = "",
     phone: str = "",
 ) -> None:
+    """
+    full_name → Telegram'dan kelgan to'liq ism (ism + familiya bo'lishi mumkin)
+    """
     try:
+        parts = (full_name or "").split(" ", 1)
+        first_name = parts[0] if parts else ""
+        last_name = parts[1] if len(parts) > 1 else ""
+
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
-            None, _save_user_sync, user_id, full_name, username, phone
+            None, _save_user_sync, user_id, first_name, last_name, username, phone
         )
     except Exception as e:
         logger.warning(f"Foydalanuvchi saqlashda xato: {e}")
 
 
 async def user_has_phone(user_id: int) -> bool:
-    """Foydalanuvchining telefon raqami saqlanganmi?"""
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _user_has_phone_sync, user_id)
     except Exception:
         return False
-
-
-def _user_has_phone_sync(user_id: int) -> bool:
-    ws = get_users_sheet()
-    existing = ws.col_values(1)
-    if str(user_id) not in existing:
-        return False
-    idx = existing.index(str(user_id)) + 1  # 1-based
-    phone_val = ws.cell(idx, 4).value  # 4-ustun: telefon
-    return bool(phone_val and str(phone_val).strip())
 
 
 async def get_all_users() -> list[int]:
@@ -155,7 +165,7 @@ async def get_all_users() -> list[int]:
 
 def _get_all_users_sync() -> list[int]:
     ws = get_users_sheet()
-    values = ws.col_values(1)[1:]  # 1-qator sarlavha
+    values = ws.col_values(2)[1:]  # 2-ustun: Telegram ID, 1-qator sarlavha
     result = []
     for v in values:
         try:

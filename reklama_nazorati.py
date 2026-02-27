@@ -152,7 +152,9 @@ def _cleanup_sync(ws: gspread.Worksheet) -> None:
     for i, row in enumerate(valid_rows, start=1):
         while len(row) < 8:
             row.append("")
-        row[0] = str(i)
+        row[0] = str(i)                              # T/r
+        if not str(row[7]).strip():                  # Holati bo'sh bo'lsa
+            row[7] = "Faol"
 
     total = len(all_rows)
     count = len(valid_rows)

@@ -46,7 +46,7 @@ GROUP_ID = int(os.getenv("GROUP_ID", "0"))
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 CHANNEL_LINK = "https://t.me/FORTUNABIZNES_GALLAOROL"
 SPREADSHEET_ID = "1UU87w2q9zk8q5_3pQqfVhp0Zp2hnU70bWWgu1R9q3No"
-SUBADMIN_SHEET = "Sub-adminlar"
+SUBADMIN_SHEET = "sub_adminlar"
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",

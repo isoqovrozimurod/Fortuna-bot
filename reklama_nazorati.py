@@ -46,7 +46,7 @@ GROUP_ID = int(os.getenv("GROUP_ID", "0"))
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 CHANNEL_LINK = "https://t.me/FORTUNABIZNES_GALLAOROL"
 SPREADSHEET_ID = "1UU87w2q9zk8q5_3pQqfVhp0Zp2hnU70bWWgu1R9q3No"
-SUBADMIN_SHEET = "Sub_adminlar"
+SUBADMIN_SHEET = "Sub-adminlar"
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
@@ -54,8 +54,12 @@ SCOPES = [
 
 SCHEDULER: AsyncIOScheduler | None = None
 
-# Kunlik screenshot hisob — xotirada (restart da tozalanadi)
+# Kunlik screenshot hisob — xotirada
 _screenshots: dict[int, dict] = {}
+
+# Race condition oldini olish — bir vaqtda bir user uchun bitta yozuv
+_registering: set[int] = set()
+_register_lock = asyncio.Lock()
 
 
 # =================== SHEETS =====================
@@ -134,10 +138,14 @@ def _cleanup_sync(ws: gspread.Worksheet) -> None:
     if len(all_rows) <= 1:
         return
 
-    valid_rows = [
-        row for row in all_rows[1:]
-        if len(row) > 1 and str(row[1]).strip()
-    ]
+    # Dublikatlarni ham o'chiramiz — bir xil ID dan faqat birinchisi qoladi
+    seen_ids: set[str] = set()
+    valid_rows = []
+    for row in all_rows[1:]:
+        tg_id = str(row[1]).strip() if len(row) > 1 else ""
+        if tg_id and tg_id not in seen_ids:
+            seen_ids.add(tg_id)
+            valid_rows.append(row)
     if not valid_rows:
         return
 
@@ -177,8 +185,17 @@ def _get_all_active_sync() -> list[dict]:
 
 
 async def register_user(user_id: int, full_name: str, username: str) -> bool:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _register_sync, user_id, full_name, username)
+    """Bir vaqtda bir xil user uchun faqat bitta yozuv — lock bilan"""
+    async with _register_lock:
+        if user_id in _registering:
+            return False  # Hozir yozilmoqda, o'tkazib yuboramiz
+        _registering.add(user_id)
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _register_sync, user_id, full_name, username)
+    finally:
+        async with _register_lock:
+            _registering.discard(user_id)
 
 
 async def set_status(user_id: int, status: str) -> None:
@@ -379,11 +396,13 @@ async def process_registration(callback: CallbackQuery):
 # =================== NAZORAT HISOBOTI ===================
 
 def _mention(user_id: str, name: str) -> str:
-    safe = name.replace("<", "").replace(">", "")
+    """ID orqali mention — ism bo'sh bo'lsa ham ishlaydi"""
+    safe = (name or "Xodim").replace("<", "").replace(">", "").strip() or "Xodim"
     return f'<a href="tg://user?id={user_id}">{safe}</a>'
 
 
 async def _send_long(bot: Bot, chat_id: int, text: str) -> None:
+    """4096 limitdan oshmasligi uchun bo'lib yuboradi"""
     limit = 3800
     while text:
         if len(text) <= limit:
@@ -416,7 +435,9 @@ async def check_screenshots(bot: Bot) -> None:
                 )
         return
 
-    debtors, completed = [], 0
+    debtors = []
+    done_list = []
+
     for u in active:
         try:
             uid = int(u["id"])
@@ -424,11 +445,12 @@ async def check_screenshots(bot: Bot) -> None:
             continue
         cnt = get_screenshot_count(uid)
         if cnt >= 2:
-            completed += 1
+            done_list.append(u)
         else:
             debtors.append({**u, "count": cnt})
 
     total = len(active)
+    completed = len(done_list)
     time_str = now_tz().strftime("%H:%M")
     h, m = now_tz().hour, now_tz().minute
     next_check = (
@@ -436,26 +458,38 @@ async def check_screenshots(bot: Bot) -> None:
         else "Bugun 15:00" if h < 15
         else "Ertaga 09:30"
     )
+    percent = int(completed / total * 100) if total else 0
 
     if debtors:
-        lines = []
+        # --- Bajarganlar ro'yxati ---
+        done_lines = ""
+        if done_list:
+            done_lines = "\n✅ <b>Bajarganlar:</b>\n"
+            for u in done_list:
+                done_lines += f"   ✔️ {_mention(u['id'], u['name'])} — 2/2 ✅\n"
+
+        # --- Bajarmagan har bir xodimga alohida mention ---
+        debtor_lines = "\n❌ <b>BAJARMAGAN XODIMLAR:</b>\n"
         for i, u in enumerate(debtors, 1):
-            uname = f" ({u['username']})" if u.get("username") else ""
-            lines.append(
-                f"{i}. {_mention(u['id'], u['name'])}{uname}\n"
-                f"   📸 Bugun: <b>{u['count']}/2</b> ❌\n"
+            cnt = u["count"]
+            debtor_lines += (
+                f"\n{i}. {_mention(u['id'], u['name'])}\n"
+                f"   📸 {cnt}/2 screenshot — " +
+                ("bitta yetishmayapti! ⚠️\n" if cnt == 1 else "hali birorta ham yoq! 🚫\n")
             )
+
         text = (
-            f"🚨 <b>NAZORAT HISOBOTI ({time_str})</b>\n\n"
-            f"👥 Faol xodimlar: {total}\n"
-            f"✅ Bajarganlar: {completed}\n"
-            f"❌ Bajarmaganlar: {len(debtors)}\n"
-            f"📊 Bajarilish: {int(completed / total * 100)}%\n\n"
-            "➖➖➖➖➖➖➖➖➖➖\n"
-            "👇 <b>BAJARMAGAN XODIMLAR:</b>\n\n"
-            + "\n".join(lines)
+            f"🚨 <b>NAZORAT HISOBOTI — {time_str}</b>\n"
+            f"📅 {now_tz().strftime('%d.%m.%Y')}\n\n"
+            f"👥 Jami faol: {total} ta xodim\n"
+            f"✅ Bajardi: {completed} ta\n"
+            f"❌ Bajarmadi: {len(debtors)} ta\n"
+            f"📊 Bajarilish: {percent}%\n"
+            + done_lines
+            + debtor_lines
             + f"\n➖➖➖➖➖➖➖➖➖➖\n"
-            f"❗ Zudlik bilan reklama tarqatib screenshot yuboring!\n"
+            f"❗ <b>Yuqoridagi xodimlar zudlik bilan\n"
+            f"reklama tarqatib, screenshot yuborsin!</b>\n\n"
             f"📌 {CHANNEL_LINK}\n"
             f"⏰ Keyingi tekshiruv: {next_check}"
         )
@@ -467,12 +501,16 @@ async def check_screenshots(bot: Bot) -> None:
             logger.error(f"Hisobot yuborishda xato: {e}")
     else:
         with contextlib.suppress(Exception):
+            done_lines = "\n".join(
+                f"   ✔️ {_mention(u['id'], u['name'])}" for u in done_list
+            )
             await bot.send_message(
                 GROUP_ID,
-                f"🏆 <b>AJOYIB! ({time_str})</b>\n\n"
-                "✅ Barcha xodimlar rejani bajardi!\n\n"
-                f"👥 {total} ta xodim — barchasi 2/2 screenshot yubordi\n"
-                "👏 Rahmat!",
+                f"🏆 <b>AJOYIB! — {time_str}</b>\n\n"
+                "✅ <b>BARCHA XODIMLAR REJANI BAJARDI!</b>\n\n"
+                f"👥 {total} ta xodim — barchasi 2/2 screenshot yubordi\n\n"
+                f"{done_lines}\n\n"
+                "👏 Jamoaga rahmat! 💪",
                 parse_mode="HTML"
             )
 
@@ -484,10 +522,9 @@ async def check_screenshots(bot: Bot) -> None:
                 f"👥 Faol: {total}\n"
                 f"✅ Bajargan: {completed}\n"
                 f"❌ Bajarmagan: {len(debtors)}\n"
-                f"📈 {int(completed / total * 100)}%",
+                f"📈 {percent}%",
                 parse_mode="HTML"
             )
-
 
 # =================== SCHEDULER ===================
 

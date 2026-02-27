@@ -27,6 +27,10 @@ from google.oauth2.service_account import Credentials
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Race condition oldini olish
+_registering: set[int] = set()
+_register_lock = asyncio.Lock()
 router = Router()
 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
@@ -83,10 +87,14 @@ def _cleanup_sheet_sync() -> None:
     data_rows = all_rows[1:]
 
     # Telegram ID bo'sh bo'lmagan qatorlarni olamiz
-    valid_rows = [
-        row for row in data_rows
-        if len(row) > 1 and str(row[1]).strip()
-    ]
+    # Dublikatlarni ham o'chiramiz — bir xil ID dan faqat birinchisi qoladi
+    seen_ids: set[str] = set()
+    valid_rows = []
+    for row in data_rows:
+        tg_id = str(row[1]).strip() if len(row) > 1 else ""
+        if tg_id and tg_id not in seen_ids:
+            seen_ids.add(tg_id)
+            valid_rows.append(row)
 
     if not valid_rows:
         return
@@ -189,12 +197,28 @@ def _save_user_sync(
 
 
 async def cleanup_sheet() -> None:
-    """Varaqni tozalaydi: bo'sh qatorlarni o'chiradi, T/r ni tartiblab qayta yozadi"""
+    """user va Sub-adminlar varaqlarini tozalaydi:
+    - Bo'sh qatorlar o'chiriladi
+    - Dublikatlar (bir xil Telegram ID) o'chiriladi
+    - T/r 1 dan tartiblab qayta yoziladi
+    """
+    loop = asyncio.get_event_loop()
+
+    # 1. user varag'ini tozalaymiz
     try:
-        loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _cleanup_sheet_sync)
     except Exception as e:
-        logger.error(f"Varaqni tozalashda xato: {e}")
+        logger.error(f"user varag'ini tozalashda xato: {e}")
+
+    # 2. Sub-adminlar varag'ini tozalaymiz
+    try:
+        from reklama_nazorati import _get_ws, _cleanup_sync
+        def _cleanup_subadmin():
+            ws = _get_ws()
+            _cleanup_sync(ws)
+        await loop.run_in_executor(None, _cleanup_subadmin)
+    except Exception as e:
+        logger.error(f"Sub-adminlar varag'ini tozalashda xato: {e}")
 
 
 async def save_user(
@@ -203,9 +227,11 @@ async def save_user(
     username: str = "",
     phone: str = "",
 ) -> None:
-    """
-    full_name → Telegram'dan kelgan to'liq ism (ism + familiya bo'lishi mumkin)
-    """
+    """Bir vaqtda bir xil user uchun faqat bitta yozuv — lock bilan"""
+    async with _register_lock:
+        if user_id in _registering:
+            return  # Hozir yozilmoqda
+        _registering.add(user_id)
     try:
         parts = (full_name or "").split(" ", 1)
         first_name = parts[0] if parts else ""
@@ -217,6 +243,9 @@ async def save_user(
         )
     except Exception as e:
         logger.warning(f"Foydalanuvchi saqlashda xato: {e}")
+    finally:
+        async with _register_lock:
+            _registering.discard(user_id)
 
 
 async def user_has_phone(user_id: int) -> bool:
@@ -299,9 +328,16 @@ async def cmd_cleanup_users(message: Message, state: FSMContext):
     """Foydalanuvchilar varag'ini tozalaydi va T/r ni tartiblab qayta yozadi"""
     if message.from_user.id != ADMIN_ID:
         return
-    msg = await message.answer("⏳ Varaq tozalanmoqda...")
+    msg = await message.answer("⏳ Tozalanmoqda...")
     await cleanup_sheet()
-    await msg.edit_text("✅ Varaq tozalandi! Bo'sh qatorlar o'chirildi, T/r tartiblab qayta yozildi.")
+    await msg.edit_text(
+        "✅ <b>Tozalash yakunlandi!</b>\n\n"
+        "• Bosh qatorlar ochirildi\n"
+        "• Dublikatlar ochirildi\n"
+        "• T/r tartiblab qayta yozildi\n\n"
+        "user va Sub-adminlar varaqlari tozalandi.",
+        parse_mode="HTML"
+    )
 
 
 @router.message(Command("broadcast"))

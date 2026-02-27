@@ -99,11 +99,13 @@ def _cleanup_sheet_sync() -> None:
     if not valid_rows:
         return
 
-    # T/r ni 1 dan boshlab qayta tartiblаymiz
+    # T/r tartiblaymiz, Holati bo'sh bo'lsa "Faol" qilamiz
     for i, row in enumerate(valid_rows, start=1):
         while len(row) < 8:
             row.append("")
-        row[0] = str(i)
+        row[0] = str(i)                              # T/r
+        if not str(row[7]).strip():                  # Holati bo'sh bo'lsa
+            row[7] = "Faol"
 
     # Butun varaqni qayta yozamiz
     total_existing = len(all_rows)

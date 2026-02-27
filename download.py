@@ -54,7 +54,7 @@ ITEMS = [
         "id": "subadmin_sheet",
         "label": "🛡 Sub-adminlar",
         "type": "sheet",
-        "sheet": "Sub-adminlar",
+        "sheet": "sub_adminlar",
         "filename": "sub_adminlar.csv",
     },
     {
@@ -155,7 +155,7 @@ def _cleanup_sync(sheet_name: str) -> None:
 
 
 # Tozalanadigan sheetlar ro'yxati (sheet nomi)
-CLEANABLE_SHEETS = {"user", "Sub-adminlar"}
+CLEANABLE_SHEETS = {"user", "sub_adminlar"}
 
 
 async def _cleanup_before_download(sheet_name: str) -> None:
@@ -264,9 +264,8 @@ async def handle_download(call: CallbackQuery, bot: Bot):
             await bot.send_document(
                 call.from_user.id,
                 file,
-                caption="""📦 <b>Barcha ma\'lumotlar</b>
-                         📁 fortuna_biznes_malumotlar.xlsx""",
-                         parse_mode="HTML",
+                caption="📦 <b>Barcha malumotlar</b>\n📁 fortuna_biznes_malumotlar.xlsx",
+                parse_mode="HTML",
             )
         except Exception as e:
             logger.error(f"Excel export xato: {e}")

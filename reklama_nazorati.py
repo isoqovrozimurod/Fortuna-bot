@@ -133,39 +133,50 @@ def _register_sync(user_id: int, full_name: str, username: str) -> bool:
 
 
 def _cleanup_sync(ws: gspread.Worksheet) -> None:
-    """Bo'sh qatorlarni o'chiradi, T/r ni tartiblab qayta yozadi"""
+    """
+    Sub-adminlar varag'ini to'liq tartiblab qayta yozadi:
+    - Bo'sh Telegram ID li qatorlar o'chiriladi
+    - Dublikat ID lar o'chiriladi (birinchisi qoladi)
+    - T/r 1 dan tartiblab qayta yoziladi
+    - Holati bo'sh bo'lsa "Faol" qilinadi
+    - Sana bo'sh bo'lsa hozirgi vaqt yoziladi
+    """
     all_rows = ws.get_all_values()
     if len(all_rows) <= 1:
         return
 
-    # Dublikatlarni ham o'chiramiz — bir xil ID dan faqat birinchisi qoladi
     seen_ids: set[str] = set()
     valid_rows = []
     for row in all_rows[1:]:
         tg_id = str(row[1]).strip() if len(row) > 1 else ""
         if tg_id and tg_id not in seen_ids:
             seen_ids.add(tg_id)
-            valid_rows.append(row)
+            valid_rows.append(list(row))  # copy
+
     if not valid_rows:
         return
 
+    sana_now = now_tz().strftime("%Y-%m-%d %H:%M")
     for i, row in enumerate(valid_rows, start=1):
         while len(row) < 8:
             row.append("")
-        row[0] = str(i)                              # T/r
-        if not str(row[7]).strip():                  # Holati bo'sh bo'lsa
+        row[0] = str(i)                   # T/r
+        if not str(row[7]).strip():       # Holati
             row[7] = "Faol"
+        if not str(row[6]).strip():       # Qo'shilgan sana
+            row[6] = sana_now
 
-    total = len(all_rows)
+    total_existing = len(all_rows)
     count = len(valid_rows)
 
     ws.update(f"A2:H{count + 1}", valid_rows, value_input_option="RAW")
 
-    if total > count + 1:
-        ws.update(f"A{count + 2}:H{total}",
-                  [[""] * 8] * (total - count - 1),
-                  value_input_option="RAW")
-
+    if total_existing > count + 1:
+        ws.update(
+            f"A{count + 2}:H{total_existing}",
+            [[""] * 8] * (total_existing - count - 1),
+            value_input_option="RAW"
+        )
 
 def _set_status_sync(user_id: int, status: str) -> None:
     row_idx = _find_row_sync(user_id)

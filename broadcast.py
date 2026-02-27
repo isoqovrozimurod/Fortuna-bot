@@ -259,9 +259,21 @@ async def cleanup_sheet() -> None:
 
     # 2. Sub-adminlar varag'ini tozalaymiz
     try:
-        await loop.run_in_executor(None, _cleanup_any_sheet, "Sub-adminlar")
+        await loop.run_in_executor(None, _cleanup_any_sheet, "sub_adminlar")
     except Exception as e:
+        import traceback
         logger.error(f"Sub-adminlar varag'ini tozalashda xato: {e}")
+        logger.error(traceback.format_exc())
+        # Mavjud varaq nomlarini ko'rsatamiz
+        try:
+            def _list_sheets():
+                gc = get_sheets_client()
+                sh = gc.open_by_key(SPREADSHEET_ID)
+                return [ws.title for ws in sh.worksheets()]
+            sheets = await loop.run_in_executor(None, _list_sheets)
+            logger.error(f"Mavjud varaqlar: {sheets}")
+        except Exception as e2:
+            logger.error(f"Varaqlarni olishda ham xato: {e2}")
 
 
 async def save_user(

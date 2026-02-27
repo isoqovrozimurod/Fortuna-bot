@@ -198,6 +198,51 @@ def _save_user_sync(
         ws.append_row(new_row, value_input_option="RAW")
 
 
+def _cleanup_any_sheet(sheet_name: str) -> None:
+    """Istalgan varaqni tozalaydi: bo'sh qatorlar, dublikatlar, T/r, Holati"""
+    gc = get_sheets_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet(sheet_name)
+
+    all_rows = ws.get_all_values()
+    if len(all_rows) <= 1:
+        return
+
+    seen_ids: set[str] = set()
+    valid_rows = []
+    for row in all_rows[1:]:
+        tg_id = str(row[1]).strip() if len(row) > 1 else ""
+        if tg_id and tg_id not in seen_ids:
+            seen_ids.add(tg_id)
+            valid_rows.append(list(row))
+
+    if not valid_rows:
+        return
+
+    from datetime import datetime as _dt
+    sana_now = _dt.now().strftime("%Y-%m-%d %H:%M")
+    for i, row in enumerate(valid_rows, start=1):
+        while len(row) < 8:
+            row.append("")
+        row[0] = str(i)
+        if not str(row[7]).strip():
+            row[7] = "Faol"
+        if not str(row[6]).strip():
+            row[6] = sana_now
+
+    total = len(all_rows)
+    count = len(valid_rows)
+
+    ws.update(f"A2:H{count + 1}", valid_rows, value_input_option="RAW")
+
+    if total > count + 1:
+        ws.update(
+            f"A{count + 2}:H{total}",
+            [[""] * 8] * (total - count - 1),
+            value_input_option="RAW"
+        )
+
+
 async def cleanup_sheet() -> None:
     """user va Sub-adminlar varaqlarini tozalaydi:
     - Bo'sh qatorlar o'chiriladi
@@ -214,11 +259,7 @@ async def cleanup_sheet() -> None:
 
     # 2. Sub-adminlar varag'ini tozalaymiz
     try:
-        from reklama_nazorati import _get_ws, _cleanup_sync
-        def _cleanup_subadmin():
-            ws = _get_ws()
-            _cleanup_sync(ws)
-        await loop.run_in_executor(None, _cleanup_subadmin)
+        await loop.run_in_executor(None, _cleanup_any_sheet, "Sub-adminlar")
     except Exception as e:
         logger.error(f"Sub-adminlar varag'ini tozalashda xato: {e}")
 

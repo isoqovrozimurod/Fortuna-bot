@@ -241,15 +241,19 @@ class SubscriptionMiddleware(BaseMiddleware):
                     not_joined.append(ch)
             except TelegramBadRequest:
                 not_joined.append(ch)
+            except Exception:
+                # Timeout yoki boshqa xato — o'tkazib yuboramiz
+                pass
 
         if not not_joined:
             return await handler(event, data)
 
-        await bot.send_message(
-            user.id,
-            "❗ Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:",
-            reply_markup=subscription_keyboard(not_joined)
-        )
+        with contextlib.suppress(Exception):
+            await bot.send_message(
+                user.id,
+                "❗ Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling:",
+                reply_markup=subscription_keyboard(not_joined)
+            )
         return
 
 

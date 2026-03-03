@@ -202,8 +202,21 @@ async def check_screenshots(bot: Bot):
 def setup_scheduler(bot: Bot):
     """Asosiy main.py dan chaqiriladigan funksiya."""
     scheduler = AsyncIOScheduler(timezone=TZ)
-    # Nazorat vaqtlari
-    scheduler.add_job(check_screenshots, CronTrigger(hour=9, minute=30), args=[bot])
-    scheduler.add_job(check_screenshots, CronTrigger(hour=15, minute=0), args=[bot])
+    
+    # Har kuni 09:30 va 15:00 da nazorat hisobotini chiqarish
+    scheduler.add_job(
+        check_screenshots, 
+        CronTrigger(hour=9, minute=30), 
+        args=[bot],
+        id="check_930"
+    )
+    scheduler.add_job(
+        check_screenshots, 
+        CronTrigger(hour=15, minute=0), 
+        args=[bot],
+        id="check_1500"
+    )
+    
     scheduler.start()
-    logger.info("Scheduler ishga tushdi.")
+    logger.info("Scheduler muvaffaqiyatli ishga tushdi: 09:30 va 15:00 nazoratlari o'rnatildi.")
+    return scheduler # main.py shutdown qilishi uchun obyektni qaytaramiz

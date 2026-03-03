@@ -117,35 +117,51 @@ def _col_letter(n: int) -> str:
 
 # ===================== SCREENSHOT: READ → INCREMENT → WRITE =====================
 
-def _write_and_get_count_sync(user_id: int) -> int:
-    """
-    Sheets dan hozirgi sonni o'qiydi, 1 ga oshiradi, yozadi.
-    Qo'lda kiritilgan ma'lumotlar ham asosga olinadi.
-    """
+# Kunlik lokal hisob — Sheets ga yozish orqa fonda
+# {user_id: {"date": "01.03.2026", "count": 2}}
+_local_counts: dict[int, dict] = {}
+
+
+def _local_get(user_id: int) -> int:
+    data = _local_counts.get(user_id)
+    if data and data.get("date") == today_str():
+        return data.get("count", 0)
+    return 0
+
+
+def _local_set(user_id: int, count: int) -> None:
+    _local_counts[user_id] = {"date": today_str(), "count": count}
+
+
+def _write_to_sheet_sync(user_id: int, count: int) -> None:
+    """Orqa fonda Sheets ga yozadi. Bot ni blokladmaydi."""
     try:
         sheet = _ws()
         date_col = _get_date_col(sheet, today_str())
         row = _find_row(sheet, user_id)
-
-        if not row:
-            logger.warning(f"Screenshot: {user_id} sub_adminlar da topilmadi")
-            return 0
-
-        val = sheet.cell(row, date_col).value
-        current = int(val) if val and str(val).strip().isdigit() else 0
-        new_count = current + 1
-        sheet.update_cell(row, date_col, new_count)
-        logger.info(f"Screenshot yozildi: {user_id} → {new_count}")
-        return new_count
+        if row:
+            sheet.update_cell(row, date_col, count)
+            logger.info(f"Sheets yozildi: {user_id} → {count}")
+        else:
+            logger.warning(f"Sheets: {user_id} topilmadi")
     except Exception as e:
-        logger.error(f"Screenshot yozishda xato ({user_id}): {e}")
-        return 0
+        logger.error(f"Sheets yozishda xato ({user_id}): {e}")
 
 
-async def write_and_get_count(user_id: int) -> int:
-    return await asyncio.get_event_loop().run_in_executor(
-        None, _write_and_get_count_sync, user_id
-    )
+def get_count_for_check(user_id: int, sheet_records: list[dict]) -> int:
+    """
+    Nazorat uchun: Sheets dan kelgan records + lokal hisob.
+    Ikkalasidan kattasini oladi.
+    """
+    today = today_str()
+    from_sheet = 0
+    for r in sheet_records:
+        if str(r.get("Telegram ID", "")).strip() == str(user_id):
+            v = r.get(today, 0)
+            from_sheet = int(v) if str(v).strip().isdigit() else 0
+            break
+    from_local = _local_get(user_id)
+    return max(from_sheet, from_local)
 
 
 # ===================== RO'YXATGA OLISH =====================
@@ -307,18 +323,25 @@ async def handle_media(message: Message):
     with contextlib.suppress(Exception):
         await register_user(u.id, u.full_name or "", u.username or "")
 
-    # Sheets dan o'qib, oshirib, yozamiz — AWAIT bilan (background emas)
-    count = await write_and_get_count(u.id)
+    # Lokal hisob darhol oshiriladi (0ms) — foydalanuvchiga javob tez boradi
+    count = _local_get(u.id) + 1
+    _local_set(u.id, count)
 
-    if count > 0:
-        emoji = "📸" if count == 1 else "✅" if count == 2 else "🎉"
-        text = f"{emoji} <b>{u.full_name}</b>\n📊 Bugun: <b>{count}/2</b>"
-        if count == 2:
-            text += "\n\n🌟 Kunlik reja bajarildi!"
-        elif count > 2:
-            text += f"\n\n🔥 {count}-screenshot — zo'r!"
-        with contextlib.suppress(Exception):
-            await message.reply(text, parse_mode="HTML")
+    # Sheets ga yozish ORQA FONDA — bot bloklanmaydi
+    asyncio.ensure_future(
+        asyncio.get_event_loop().run_in_executor(
+            None, _write_to_sheet_sync, u.id, count
+        )
+    )
+
+    emoji = "📸" if count == 1 else "✅" if count == 2 else "🎉"
+    text = f"{emoji} <b>{u.full_name}</b>\n📊 Bugun: <b>{count}/2</b>"
+    if count == 2:
+        text += "\n\n🌟 Kunlik reja bajarildi!"
+    elif count > 2:
+        text += f"\n\n🔥 {count}-screenshot — zo'r!"
+    with contextlib.suppress(Exception):
+        await message.reply(text, parse_mode="HTML")
 
     logger.info(f"Screenshot: {u.full_name} ({u.id}) → {count}")
 
@@ -438,7 +461,14 @@ async def check_screenshots(bot: Bot) -> None:
             continue
 
         cnt_raw = r.get(today, 0)
-        cnt = int(cnt_raw) if str(cnt_raw).strip().isdigit() else 0
+        from_sheet = int(cnt_raw) if str(cnt_raw).strip().isdigit() else 0
+        # Lokal hisob + Sheets — kattasini olamiz
+        try:
+            uid_int = int(tg_id)
+            from_local = _local_get(uid_int)
+        except ValueError:
+            from_local = 0
+        cnt = max(from_sheet, from_local)
 
         name = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
         entry = {"id": tg_id, "name": name, "count": cnt}

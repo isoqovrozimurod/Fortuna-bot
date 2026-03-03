@@ -348,8 +348,11 @@ async def handle_media(message: Message):
 
 @router.message(~F.photo, ~F.document)
 async def handle_text(message: Message):
-    """Matn yoki boshqa xabar — faqat ro'yxatga olish."""
+    """Matn xabar — faqat ro'yxatga olish. Buyruqlar o'tkazib yuboriladi."""
     if not _is_group(message):
+        return
+    # Buyruqlarni o'tkazib yuboramiz
+    if message.text and message.text.startswith("/"):
         return
     with contextlib.suppress(Exception):
         await register_user(

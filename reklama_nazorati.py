@@ -1,9 +1,15 @@
 """
-Reklama Nazorat Tizimi
-- Sheets ASOSIY MANBA: read → increment → write (bir operatsiyada)
-- Qo'lda kiritilganlar ham hisoblanadi
-- 09:30 va 15:00 nazorat
-- Haftalik/oylik statistika
+Reklama Nazorat Tizimi — Bot qismi
+===================================
+Apps Script nima qiladi (bot ga kerak EMAS):
+  - 09:30 / 15:00 nazorat xabarlari
+  - Haftalik / oylik statistika xabarlari
+  - Kunlik yangi sana ustunini yaratish
+
+Bot nima qiladi (bu fayl):
+  - Guruhdan screenshot/rasm → Sheets ga raqam yozish
+  - chat_member: qo'shilish / chiqish
+  - /start_register, /reklama_tekshir, /reklama_stat, /reklama_users, /sync_subadmin
 """
 
 import os
@@ -26,14 +32,12 @@ from aiogram.types import (
 )
 from aiogram.filters import ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER, Command
 from aiogram.exceptions import TelegramForbiddenError
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 
 # ===================== SOZLAMALAR =====================
 
 router = Router()
 logger = logging.getLogger(__name__)
-TZ = ZoneInfo("Asia/Tashkent")
+TZ     = ZoneInfo("Asia/Tashkent")
 
 
 def now_tz() -> datetime:
@@ -56,7 +60,7 @@ SCOPES = [
 ]
 BASE_COLS = 8
 
-SCHEDULER: AsyncIOScheduler | None = None
+# APScheduler OLIB TASHLANDI — Apps Script buni qiladi
 _gc: gspread.Client | None = None
 _registering: set[int] = set()
 _reg_lock = asyncio.Lock()
@@ -67,12 +71,12 @@ _reg_lock = asyncio.Lock()
 def _get_gc() -> gspread.Client:
     global _gc
     if _gc is None:
-        b64 = os.getenv("GOOGLE_CREDENTIALS_B64")
+        b64  = os.getenv("GOOGLE_CREDENTIALS_B64")
         if not b64:
             raise RuntimeError("GOOGLE_CREDENTIALS_B64 topilmadi")
-        info = json.loads(base64.b64decode(b64).decode())
+        info  = json.loads(base64.b64decode(b64).decode())
         creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-        _gc = gspread.authorize(creds)
+        _gc   = gspread.authorize(creds)
     return _gc
 
 
@@ -91,6 +95,13 @@ def _user_ws() -> gspread.Worksheet:
     return _get_gc().open_by_key(SPREADSHEET_ID).worksheet(USER_SHEET)
 
 
+def _find_row(ws: gspread.Worksheet, user_id: int) -> int | None:
+    for i, v in enumerate(ws.col_values(2), start=1):
+        if str(v).strip() == str(user_id):
+            return i
+    return None
+
+
 def _get_date_col(ws: gspread.Worksheet, date_str: str) -> int:
     headers = ws.row_values(1)
     if date_str in headers:
@@ -98,13 +109,6 @@ def _get_date_col(ws: gspread.Worksheet, date_str: str) -> int:
     new_col = len(headers) + 1
     ws.update_cell(1, new_col, date_str)
     return new_col
-
-
-def _find_row(ws: gspread.Worksheet, user_id: int) -> int | None:
-    for i, v in enumerate(ws.col_values(2), start=1):
-        if str(v).strip() == str(user_id):
-            return i
-    return None
 
 
 def _col_letter(n: int) -> str:
@@ -115,9 +119,9 @@ def _col_letter(n: int) -> str:
     return s
 
 
-# ===================== SCREENSHOT HISOBLASH =====================
+# ===================== LOCAL KESH =====================
 
-_local_counts: dict[int, dict] = {}  # {user_id: {"date": "01.03.2026", "count": 2}}
+_local_counts: dict[int, dict] = {}
 
 
 def _local_get(user_id: int) -> int:
@@ -132,26 +136,14 @@ def _local_set(user_id: int, count: int) -> None:
 
 
 def _write_to_sheet_sync(user_id: int, count: int) -> None:
-    """Orqa fonda Sheets ga yozadi. Bot ni blokladmaydi."""
     try:
-        sheet = _ws()
+        sheet    = _ws()
         date_col = _get_date_col(sheet, today_str())
-        row = _find_row(sheet, user_id)
+        row      = _find_row(sheet, user_id)
         if row:
             sheet.update_cell(row, date_col, count)
     except Exception as e:
         logger.error(f"Sheets yozishda xato ({user_id}): {e}")
-
-
-def get_count_for_check(user_id: int, sheet_records: list[dict]) -> int:
-    today = today_str()
-    from_sheet = 0
-    for r in sheet_records:
-        if str(r.get("Telegram ID", "")).strip() == str(user_id):
-            v = r.get(today, 0)
-            from_sheet = int(v) if str(v).strip().isdigit() else 0
-            break
-    return max(from_sheet, _local_get(user_id))
 
 
 # ===================== RO'YXATGA OLISH =====================
@@ -160,15 +152,15 @@ def _register_sync(user_id: int, full_name: str, username: str) -> bool:
     sheet = _ws()
     if _find_row(sheet, user_id):
         return False
-    parts = (full_name or "").split(" ", 1)
-    ism = parts[0]
-    familiya = parts[1] if len(parts) > 1 else ""
-    uname = f"@{username}" if username else ""
-    sana = now_tz().strftime("%Y-%m-%d %H:%M")
-    all_vals = sheet.get_all_values()
-    headers = all_vals[0] if all_vals else []
+    parts       = (full_name or "").split(" ", 1)
+    ism         = parts[0]
+    familiya    = parts[1] if len(parts) > 1 else ""
+    uname       = f"@{username}" if username else ""
+    sana        = now_tz().strftime("%Y-%m-%d %H:%M")
+    all_vals    = sheet.get_all_values()
+    headers     = all_vals[0] if all_vals else []
     valid_count = sum(1 for r in all_vals[1:] if len(r) > 1 and r[1].strip())
-    tr = valid_count + 1
+    tr  = valid_count + 1
     row = [str(tr), str(user_id), uname, ism, familiya, "", sana, "Faol"]
     while len(row) < len(headers):
         row.append("")
@@ -179,19 +171,18 @@ def _register_sync(user_id: int, full_name: str, username: str) -> bool:
 
 def _set_status_sync(user_id: int, status: str) -> None:
     sheet = _ws()
-    row = _find_row(sheet, user_id)
+    row   = _find_row(sheet, user_id)
     if row:
         sheet.update_cell(row, 8, status)
 
 
 async def register_user(user_id: int, full_name: str, username: str) -> bool:
-    # FIX: Lock logikasi to'g'irlandi — lock ichida discard ham bo'lsin
     async with _reg_lock:
         if user_id in _registering:
             return False
         _registering.add(user_id)
     try:
-        loop = asyncio.get_running_loop()  # FIX: get_event_loop → get_running_loop
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _register_sync, user_id, full_name, username)
     finally:
         async with _reg_lock:
@@ -199,69 +190,11 @@ async def register_user(user_id: int, full_name: str, username: str) -> bool:
 
 
 async def set_status(user_id: int, status: str) -> None:
-    loop = asyncio.get_running_loop()  # FIX
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _set_status_sync, user_id, status)
 
 
-# ===================== CLEANUP =====================
-
-def _cleanup_sync() -> None:
-    sheet = _ws()
-    all_rows = sheet.get_all_values()
-    if len(all_rows) <= 1:
-        return
-    header_len = len(all_rows[0])
-    seen: set[str] = set()
-    valid: list[list] = []
-    sana_now = now_tz().strftime("%Y-%m-%d %H:%M")
-    for row in all_rows[1:]:
-        tg_id = str(row[1]).strip() if len(row) > 1 else ""
-        if not tg_id or tg_id in seen:
-            continue
-        seen.add(tg_id)
-        r = list(row)
-        while len(r) < header_len:
-            r.append("")
-        valid.append(r)
-    if not valid:
-        return
-    for i, row in enumerate(valid, start=1):
-        row[0] = str(i)
-        if not str(row[7]).strip():
-            row[7] = "Faol"
-        if not str(row[6]).strip():
-            row[6] = sana_now
-    total = len(all_rows)
-    count = len(valid)
-    last = _col_letter(header_len)
-    sheet.update(f"A2:{last}{count + 1}", valid, value_input_option="RAW")
-    if total > count + 1:
-        sheet.update(
-            f"A{count + 2}:{last}{total}",
-            [[""] * header_len] * (total - count - 1),
-            value_input_option="RAW"
-        )
-
-
-async def cleanup() -> None:
-    loop = asyncio.get_running_loop()  # FIX
-    await loop.run_in_executor(None, _cleanup_sync)
-
-
 # ===================== GURUH HANDLERLARI =====================
-
-def _is_group(message: Message) -> bool:
-    return (
-        message.from_user is not None
-        and not message.from_user.is_bot
-        and message.chat.id == GROUP_ID
-        and GROUP_ID != 0
-    )
-
-
-def _is_admin(message: Message) -> bool:
-    return _is_group(message) and message.from_user.id == ADMIN_ID
-
 
 @router.chat_member(ChatMemberUpdatedFilter(IS_NOT_MEMBER >> IS_MEMBER))
 async def on_join(event: ChatMemberUpdated):
@@ -283,15 +216,17 @@ async def on_leave(event: ChatMemberUpdated):
             await set_status(u.id, "Chiqib ketdi")
 
 
-# FIX: F.chat.id == GROUP_ID filter decorator da — private xabarlar hech qachon kelmaydi
 @router.message(F.chat.func(lambda c: c.id == GROUP_ID and GROUP_ID != 0), F.photo | F.document)
 async def handle_media(message: Message):
-    """Faqat GURUH rasmlari = screenshot."""
     if message.from_user is None or message.from_user.is_bot:
         return
     if message.document and not (message.document.mime_type or "").startswith("image/"):
         with contextlib.suppress(Exception):
-            await register_user(message.from_user.id, message.from_user.full_name or "", message.from_user.username or "")
+            await register_user(
+                message.from_user.id,
+                message.from_user.full_name or "",
+                message.from_user.username or "",
+            )
         return
 
     u = message.from_user
@@ -301,38 +236,40 @@ async def handle_media(message: Message):
     count = _local_get(u.id) + 1
     _local_set(u.id, count)
 
-    # Sheets ga yozish ORQA FONDA — bot bloklanmaydi
-    asyncio.create_task(  # FIX: ensure_future → create_task
+    asyncio.create_task(
         asyncio.get_running_loop().run_in_executor(None, _write_to_sheet_sync, u.id, count)
     )
 
-    emoji = "📸" if count == 1 else "✅" if count == 2 else "🎉"
-    text = f"{emoji} <b>{u.full_name}</b>\n📊 Bugun: <b>{count}/2</b>"
+    emoji = "📸" if count == 1 else "✅" if count == 2 else "🔥"
+    text  = f"{emoji} <b>{u.full_name}</b>\n📊 Bugun: <b>{count}/2</b>"
     if count == 2:
         text += "\n\n🌟 Kunlik reja bajarildi!"
     elif count > 2:
-        text += f"\n\n🔥 {count}-screenshot — zo'r!"
+        text += f"\n\n{count}-screenshot — zo'r!"
     with contextlib.suppress(Exception):
         await message.reply(text, parse_mode="HTML")
 
 
-# FIX: Decorator da GROUP_ID filter — private xabarlar bu handlerlarga kelmaydi
 @router.message(F.chat.func(lambda c: c.id == GROUP_ID and GROUP_ID != 0), ~F.photo, ~F.document)
 async def handle_text(message: Message):
-    """Faqat GURUH matn xabarlari — ro'yxatga olish."""
     if message.from_user is None or message.from_user.is_bot:
         return
     if message.text and message.text.startswith("/"):
-        return  # Buyruqlarni o'tkazib yuboramiz
+        return
     with contextlib.suppress(Exception):
-        await register_user(message.from_user.id, message.from_user.full_name or "", message.from_user.username or "")
+        await register_user(
+            message.from_user.id,
+            message.from_user.full_name or "",
+            message.from_user.username or "",
+        )
 
 
 # ===================== QO'LDA RO'YXAT =====================
 
 @router.message(Command("start_register"))
 async def cmd_start_register(message: Message):
-    if not _is_admin(message):
+    if not (message.chat.id == GROUP_ID and message.from_user
+            and message.from_user.id == ADMIN_ID):
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ RO'YXATDAN O'TISH", callback_data="reg_me")]
@@ -340,7 +277,7 @@ async def cmd_start_register(message: Message):
     await message.bot.send_message(
         GROUP_ID,
         "📢 <b>DIQQAT!</b>\n\nBarcha xodimlar quyidagi tugmani bossin.\n\n👇 <b>Bosing:</b>",
-        reply_markup=kb, parse_mode="HTML"
+        reply_markup=kb, parse_mode="HTML",
     )
     with contextlib.suppress(Exception):
         await message.delete()
@@ -353,13 +290,13 @@ async def cb_reg_me(callback: CallbackQuery):
         is_new = await register_user(u.id, u.full_name or "", u.username or "")
         await callback.answer(
             "✅ Ro'yxatga olindingiz!" if is_new else "✅ Allaqachon bazadasiz.",
-            show_alert=True
+            show_alert=True,
         )
-    except Exception as e:
+    except Exception:
         await callback.answer("❌ Xato. Qayta urinib ko'ring.", show_alert=True)
 
 
-# ===================== MENTION =====================
+# ===================== YORDAMCHI =====================
 
 def _mention(uid: str, name: str) -> str:
     safe = (name or "Xodim").replace("<", "").replace(">", "").strip() or "Xodim"
@@ -372,42 +309,32 @@ async def _send_long(bot: Bot, chat_id: int, text: str) -> None:
         if len(text) <= limit:
             await bot.send_message(chat_id, text, parse_mode="HTML")
             break
-        cut = text.rfind("\n", 0, limit) or limit
+        cut  = text.rfind("\n", 0, limit) or limit
         await bot.send_message(chat_id, text[:cut], parse_mode="HTML")
         text = text[cut:]
 
 
-# ===================== NAZORAT (09:30 / 15:00) =====================
+# ===================== QOLDA NAZORAT =====================
 
 async def check_screenshots(bot: Bot) -> None:
     if GROUP_ID == 0:
-        logger.error("GROUP_ID sozlanmagan!")
         return
-
     try:
-        loop = asyncio.get_running_loop()  # FIX
+        loop = asyncio.get_running_loop()
         data = await loop.run_in_executor(None, lambda: _ws().get_all_records())
     except Exception as e:
         logger.error(f"Sheets o'qishda xato: {e}")
         return
 
     if not data:
-        logger.warning("sub_adminlar bo'sh!")
         if ADMIN_ID:
             with contextlib.suppress(Exception):
                 await bot.send_message(ADMIN_ID, "⚠️ sub_adminlar da hech kim yo'q!\n/start_register yuboring.")
         return
 
-    today = today_str()
-    time_str = now_tz().strftime("%H:%M")
-    h, m = now_tz().hour, now_tz().minute
-    next_check = (
-        "Bugun 09:30" if h < 9 or (h == 9 and m < 30)
-        else "Bugun 15:00" if h < 15
-        else "Ertaga 09:30"
-    )
-
-    debtors = []
+    today     = today_str()
+    time_str  = now_tz().strftime("%H:%M")
+    debtors   = []
     done_list = []
 
     for r in data:
@@ -416,57 +343,40 @@ async def check_screenshots(bot: Bot) -> None:
         tg_id = str(r.get("Telegram ID", "")).strip()
         if not tg_id:
             continue
-
-        cnt_raw = r.get(today, 0)
+        cnt_raw    = r.get(today, 0)
         from_sheet = int(cnt_raw) if str(cnt_raw).strip().isdigit() else 0
         try:
             from_local = _local_get(int(tg_id))
         except ValueError:
             from_local = 0
-        cnt = max(from_sheet, from_local)
-
+        cnt  = max(from_sheet, from_local)
         name = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
-        entry = {"id": tg_id, "name": name, "count": cnt}
+        (done_list if cnt >= 2 else debtors).append({"id": tg_id, "name": name, "count": cnt})
 
-        if cnt >= 2:
-            done_list.append(entry)
-        else:
-            debtors.append(entry)
-
-    total = len(done_list) + len(debtors)
+    total     = len(done_list) + len(debtors)
     completed = len(done_list)
-    percent = int(completed / total * 100) if total else 0
+    percent   = int(completed / total * 100) if total else 0
 
     if debtors:
         done_text = ""
         if done_list:
-            done_text = "\n✅ <b>Bajarganlar:</b>\n"
-            for u in done_list:
-                done_text += f"  ✔️ {_mention(u['id'], u['name'])} — {u['count']}/2\n"
-
+            done_text  = "\n✅ <b>Bajarganlar:</b>\n"
+            done_text += "".join(f"  ✔️ {_mention(u['id'], u['name'])} — {u['count']}/2\n" for u in done_list)
         debtor_text = "\n❌ <b>BAJARMAGAN XODIMLAR:</b>\n"
         for i, u in enumerate(debtors, 1):
-            cnt = u["count"]
-            note = "bitta yetishmayapti ⚠️" if cnt == 1 else "hali birorta ham yo'q 🚫"
-            debtor_text += f"\n{i}. {_mention(u['id'], u['name'])}\n   📸 {cnt}/2 — {note}\n"
-
+            note = "bitta yetishmayapti ⚠️" if u["count"] == 1 else "hali birorta ham yo'q 🚫"
+            debtor_text += f"\n{i}. {_mention(u['id'], u['name'])}\n   📸 {u['count']}/2 — {note}\n"
         text = (
-            f"🚨 <b>NAZORAT — {time_str}</b>\n"
-            f"📅 {now_tz().strftime('%d.%m.%Y')}\n\n"
-            f"👥 Faol: {total} | ✅ {completed} | ❌ {len(debtors)}\n"
-            f"📊 {percent}%\n"
+            f"🚨 <b>NAZORAT — {time_str}</b>\n📅 {today}\n\n"
+            f"👥 Faol: {total} | ✅ {completed} | ❌ {len(debtors)}\n📊 {percent}%\n"
             + done_text + debtor_text
             + f"\n➖➖➖➖➖➖➖➖➖➖\n"
-            f"❗ <b>Reklama tarqatib screenshot yuborsin!</b>\n"
-            f"📌 {CHANNEL_LINK}\n"
-            f"⏰ Keyingi: {next_check}"
+            f"❗ <b>Reklama tarqatib screenshot yuborsin!</b>\n📌 {CHANNEL_LINK}"
         )
         try:
             await _send_long(bot, GROUP_ID, text)
         except TelegramForbiddenError:
             logger.error("Guruhda yozish taqiqlangan!")
-        except Exception as e:
-            logger.error(f"Hisobot yuborishda xato: {e}")
     else:
         done_text = "\n".join(
             f"  ✔️ {_mention(u['id'], u['name'])} — {u['count']}/2" for u in done_list
@@ -474,8 +384,8 @@ async def check_screenshots(bot: Bot) -> None:
         with contextlib.suppress(Exception):
             await bot.send_message(
                 GROUP_ID,
-                f"🏆 <b>AJOYIB! — {time_str}</b>\n\n✅ Barcha xodimlar rejani bajardi!\n\n{done_text}\n\n👏 Rahmat!",
-                parse_mode="HTML"
+                f"🏆 <b>AJOYIB! — {time_str}</b>\n\n✅ Barcha rejani bajardi!\n\n{done_text}\n\n👏 Rahmat!",
+                parse_mode="HTML",
             )
 
     if ADMIN_ID:
@@ -483,17 +393,17 @@ async def check_screenshots(bot: Bot) -> None:
             await bot.send_message(
                 ADMIN_ID,
                 f"📊 <b>Admin — {time_str}</b>\n👥 {total} | ✅ {completed} | ❌ {len(debtors)} | 📈 {percent}%",
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
 
 
 # ===================== STATISTIKA =====================
 
 def _stats_sync(days: int) -> list[dict]:
-    sheet = _ws()
-    headers = sheet.row_values(1)
-    data = sheet.get_all_records()
-    cutoff = (now_tz() - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    sheet       = _ws()
+    headers     = sheet.row_values(1)
+    data        = sheet.get_all_records()
+    cutoff      = (now_tz() - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
     valid_dates = []
     for h in headers[BASE_COLS:]:
         try:
@@ -502,7 +412,6 @@ def _stats_sync(days: int) -> list[dict]:
                 valid_dates.append(h)
         except ValueError:
             pass
-
     result = []
     for r in data:
         if str(r.get("Holati", "")).strip() == "Chiqib ketdi":
@@ -510,7 +419,7 @@ def _stats_sync(days: int) -> list[dict]:
         tg_id = str(r.get("Telegram ID", "")).strip()
         if not tg_id:
             continue
-        name = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
+        name  = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
         total = sum(int(r[d]) if str(r.get(d, 0)).strip().isdigit() else 0 for d in valid_dates)
         result.append({"id": tg_id, "name": name, "total": total})
     result.sort(key=lambda x: x["total"], reverse=True)
@@ -518,7 +427,7 @@ def _stats_sync(days: int) -> list[dict]:
 
 
 async def get_stats(days: int) -> list[dict]:
-    loop = asyncio.get_running_loop()  # FIX
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _stats_sync, days)
 
 
@@ -526,12 +435,12 @@ def _stat_text(stats: list[dict], label: str, days: int) -> str:
     if not stats:
         return f"📊 <b>{label} statistika</b>\n\nMa'lumot yo'q."
     total_all = sum(u["total"] for u in stats)
-    d_start = (now_tz() - timedelta(days=days - 1)).strftime("%d.%m.%Y")
-    d_end = now_tz().strftime("%d.%m.%Y")
+    d_start   = (now_tz() - timedelta(days=days - 1)).strftime("%d.%m.%Y")
+    d_end     = now_tz().strftime("%d.%m.%Y")
     lines = []
     for i, u in enumerate(stats, 1):
         filled = min(u["total"], 10)
-        bar = "🟩" * filled + "⬜" * (10 - filled)
+        bar    = "🟩" * filled + "⬜" * (10 - filled)
         lines.append(f"{i}. {_mention(u['id'], u['name'])}\n   {bar} <b>{u['total']}</b> ta")
     return (
         f"📊 <b>{label} statistika</b>\n📅 {d_start} — {d_end}\n\n"
@@ -558,7 +467,7 @@ async def cmd_stat(message: Message, bot: Bot):
     await bot.send_message(
         ADMIN_ID,
         "📊 <b>Reklama statistikasi</b>\n\nQaysi davrni ko'rmoqchisiz?",
-        reply_markup=_stat_kb(), parse_mode="HTML"
+        reply_markup=_stat_kb(), parse_mode="HTML",
     )
     with contextlib.suppress(Exception):
         await message.delete()
@@ -578,44 +487,22 @@ async def cb_stat(call: CallbackQuery):
     days, label = days_map[call.data]
     try:
         stats = await get_stats(days)
-        text = _stat_text(stats, label, days)
-        await call.message.edit_text(text, reply_markup=_stat_kb(), parse_mode="HTML")
+        await call.message.edit_text(_stat_text(stats, label, days), reply_markup=_stat_kb(), parse_mode="HTML")
     except Exception as e:
         with contextlib.suppress(Exception):
             await call.message.edit_text(f"❌ Xato: {e}", reply_markup=_stat_kb())
 
 
-# ===================== SCHEDULER =====================
-
-async def _auto_weekly(bot: Bot) -> None:
-    with contextlib.suppress(Exception):
-        stats = await get_stats(7)
-        await _send_long(bot, GROUP_ID, _stat_text(stats, "Haftalik", 7))
-
-
-async def _auto_monthly(bot: Bot) -> None:
-    with contextlib.suppress(Exception):
-        stats = await get_stats(30)
-        await _send_long(bot, GROUP_ID, _stat_text(stats, "Oylik", 30))
-
-
-def setup_scheduler(bot: Bot) -> AsyncIOScheduler | None:
-    global SCHEDULER
-    if GROUP_ID == 0:
-        logger.error("GROUP_ID sozlanmagan!")
-        return None
-    s = AsyncIOScheduler(timezone="Asia/Tashkent")
-    s.add_job(check_screenshots, CronTrigger(hour=9,  minute=30), args=[bot], id="morning",   replace_existing=True, max_instances=1, coalesce=True, misfire_grace_time=300)
-    s.add_job(check_screenshots, CronTrigger(hour=15, minute=0),  args=[bot], id="afternoon", replace_existing=True, max_instances=1, coalesce=True, misfire_grace_time=300)
-    s.add_job(_auto_weekly,  CronTrigger(day_of_week="mon", hour=9, minute=0), args=[bot], id="weekly",  replace_existing=True, max_instances=1)
-    s.add_job(_auto_monthly, CronTrigger(day=1, hour=9, minute=0),             args=[bot], id="monthly", replace_existing=True, max_instances=1)
-    s.start()
-    SCHEDULER = s
-    logger.info("Scheduler: 09:30/15:00 nazorat | Du haftalik | 1-chi oylik")
-    return s
-
-
 # ===================== ADMIN BUYRUQLARI =====================
+
+def _is_admin(message: Message) -> bool:
+    return (
+        message.from_user is not None
+        and message.from_user.id == ADMIN_ID
+        and message.chat.id == GROUP_ID
+        and GROUP_ID != 0
+    )
+
 
 @router.message(Command("reklama_tekshir"))
 async def cmd_check(message: Message, bot: Bot):
@@ -633,13 +520,13 @@ async def cmd_users(message: Message):
     if not _is_admin(message):
         return
     try:
-        loop = asyncio.get_running_loop()  # FIX
+        loop = asyncio.get_running_loop()
         data = await loop.run_in_executor(None, lambda: _ws().get_all_records())
     except Exception as e:
         await message.answer(f"❌ Xato: {e}")
         return
     today = today_str()
-    text = "👥 <b>Faol xodimlar:</b>\n\n"
+    text  = "👥 <b>Faol xodimlar:</b>\n\n"
     count = 0
     for r in data:
         if str(r.get("Holati", "")).strip() == "Chiqib ketdi":
@@ -648,11 +535,11 @@ async def cmd_users(message: Message):
         if not tg_id:
             continue
         cnt_raw = r.get(today, 0)
-        cnt = int(cnt_raw) if str(cnt_raw).strip().isdigit() else 0
-        name = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
-        emoji = "✅" if cnt >= 2 else "⚠️" if cnt == 1 else "❌"
-        text += f"{emoji} <b>{name}</b> — 📸 {cnt}/2\n"
-        count += 1
+        cnt     = int(cnt_raw) if str(cnt_raw).strip().isdigit() else 0
+        name    = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
+        emoji   = "✅" if cnt >= 2 else "⚠️" if cnt == 1 else "❌"
+        text   += f"{emoji} <b>{name}</b> — 📸 {cnt}/2\n"
+        count  += 1
         if count >= 30:
             break
     if count == 0:
@@ -673,30 +560,30 @@ async def cmd_sync(message: Message, bot: Bot):
     msg = await bot.send_message(ADMIN_ID, "⏳ Sinxronlanmoqda...")
     try:
         def _sync() -> int:
-            subws = _ws()
-            usrws = _user_ws()
-            user_map: dict[str, list] = {}
-            for r in usrws.get_all_values()[1:]:
-                tid = str(r[1]).strip() if len(r) > 1 else ""
-                if tid:
-                    user_map[tid] = r
+            subws    = _ws()
+            usrws    = _user_ws()
+            user_map = {
+                str(r[1]).strip(): r
+                for r in usrws.get_all_values()[1:]
+                if len(r) > 1 and str(r[1]).strip()
+            }
             updated = 0
             for i, row in enumerate(subws.get_all_values()[1:], start=2):
                 tid = str(row[1]).strip() if len(row) > 1 else ""
                 if not tid or tid not in user_map:
                     continue
-                u = user_map[tid]
+                u       = user_map[tid]
                 changed = False
                 for ui, sc in [(2, 3), (3, 4), (4, 5), (5, 6)]:
                     cur = str(row[sc - 1]).strip() if len(row) > sc - 1 else ""
-                    src = str(u[ui]).strip() if len(u) > ui else ""
+                    src = str(u[ui]).strip()        if len(u)   > ui      else ""
                     if not cur and src:
                         subws.update_cell(i, sc, src)
                         changed = True
                 if changed:
                     updated += 1
             return updated
-        loop = asyncio.get_running_loop()  # FIX
+        loop    = asyncio.get_running_loop()
         updated = await loop.run_in_executor(None, _sync)
         await msg.edit_text(f"✅ Sinxronlash yakunlandi! {updated} ta qator yangilandi.")
     except Exception as e:
@@ -713,48 +600,22 @@ async def cmd_help(message: Message):
         "📋 <b>Reklama Nazorat — Yordam</b>\n\n"
         "<b>Xodimlar:</b>\n"
         "• Guruhga rasm yuboring — bot hisoblaydi\n"
-        "• Qo'lda Sheets ga ham kiritish mumkin\n"
         "• Har kuni kamida 2 ta rasm kerak\n\n"
-        "<b>Admin buyruqlari:</b>\n"
+        "<b>Admin buyruqlari (bot):</b>\n"
         "/start_register — Barchani ro'yxatdan o'tkazish\n"
         "/reklama_tekshir — Qo'lda nazorat\n"
         "/reklama_stat — Statistika\n"
         "/reklama_users — Faol xodimlar\n"
-        "/sync_subadmin — User dan sub_admin ga ko'chirish\n\n"
-        "<b>Avtomatik:</b>\n"
-        "⏰ 09:30, 15:00 — Nazorat\n"
+        "/sync_subadmin — User → sub_admin sinxronlash\n\n"
+        "<b>Avtomatik (Apps Script):</b>\n"
+        "⏰ 09:30, 15:00 — Nazorat xabari\n"
         "📆 Har dushanba 09:00 — Haftalik stat\n"
-        "🗓 Har oyning 1-si 09:00 — Oylik stat",
-        parse_mode="HTML"
+        "🗓 Har oyning 1-si 09:00 — Oylik stat\n"
+        "📅 Har kuni 08:00 — Yangi kun ustuni",
+        parse_mode="HTML",
     )
     with contextlib.suppress(Exception):
         await message.delete()
     await asyncio.sleep(40)
     with contextlib.suppress(Exception):
         await sent.delete()
-
-
-@router.message(Command("debug_reklama"))
-async def cmd_debug(message: Message):
-    if not message.from_user or message.from_user.id != ADMIN_ID:
-        return
-    try:
-        loop = asyncio.get_running_loop()  # FIX
-        counts = await loop.run_in_executor(None, lambda: {
-            str(r.get("Telegram ID", "")): r.get(today_str(), 0)
-            for r in _ws().get_all_records()
-            if str(r.get("Telegram ID", "")).strip()
-        })
-        detail = "\n".join(f"  {k}: {v}" for k, v in list(counts.items())[:10])
-        sheet_info = f"Sheets bugun ({today_str()}):\n{detail}"
-    except Exception as e:
-        sheet_info = f"Sheets xato: {e}"
-
-    await message.answer(
-        f"🔧 <b>Debug</b>\n\n"
-        f"Chat: <code>{message.chat.id}</code>\n"
-        f"GROUP_ID: <code>{GROUP_ID}</code>\n"
-        f"Match: {'✅' if message.chat.id == GROUP_ID else '❌'}\n\n"
-        f"{sheet_info}",
-        parse_mode="HTML"
-    )

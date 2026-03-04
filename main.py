@@ -31,7 +31,7 @@ from chanel import router as chanel_router, SubscriptionMiddleware
 from kredit import router as kredit_admin_router
 from hamkor import router as hamkor_router
 from filial import router as filial_router
-from reklama_nazorati import router as reklama_router, setup_scheduler
+from reklama_nazorati import router as reklama_router
 from broadcast import router as broadcast_router
 from download import router as download_router
 

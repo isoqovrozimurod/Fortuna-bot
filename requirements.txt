@@ -6,7 +6,7 @@ python-dotenv==1.0.1
 aiohttp==3.9.5
 
 # Scheduler
-APScheduler==3.10.4
+# APScheduler==3.10.4
 
 # Upstash Redis (distributed lock + reklama nazorati uchun)
 upstash-redis==1.0.0

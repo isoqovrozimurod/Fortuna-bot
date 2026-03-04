@@ -99,6 +99,7 @@ def setup_dispatcher() -> Dispatcher:
     dp.callback_query.middleware(SubscriptionMiddleware())
 
     dp.include_router(chanel_router)
+    dp.include_router(reklama_router)
     dp.include_router(start_router)
     dp.include_router(contact_router)
     dp.include_router(kredit_router)
@@ -113,7 +114,6 @@ def setup_dispatcher() -> Dispatcher:
     dp.include_router(control_router)
     dp.include_router(kredit_admin_router)
     dp.include_router(filial_router)
-    dp.include_router(reklama_router)
     dp.include_router(broadcast_router)
 
     return dp

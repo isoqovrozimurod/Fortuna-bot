@@ -1,15 +1,7 @@
 """
 Reklama Nazorat Tizimi — Bot qismi
-===================================
-Apps Script nima qiladi (bot ga kerak EMAS):
-  - 09:30 / 15:00 nazorat xabarlari
-  - Haftalik / oylik statistika xabarlari
-  - Kunlik yangi sana ustunini yaratish
-
-Bot nima qiladi (bu fayl):
-  - Guruhdan screenshot/rasm → Sheets ga raqam yozish
-  - chat_member: qo'shilish / chiqish
-  - /start_register, /reklama_tekshir, /reklama_stat, /reklama_users, /sync_subadmin
+Apps Script: nazorat xabarlari, triggerlar
+Bot: screenshot hisoblash, reyting, statistika
 """
 
 import os
@@ -39,14 +31,8 @@ router = Router()
 logger = logging.getLogger(__name__)
 TZ     = ZoneInfo("Asia/Tashkent")
 
-
-def now_tz() -> datetime:
-    return datetime.now(TZ)
-
-
-def today_str() -> str:
-    return now_tz().strftime("%d.%m.%Y")
-
+def now_tz() -> datetime: return datetime.now(TZ)
+def today_str() -> str:   return now_tz().strftime("%d.%m.%Y")
 
 GROUP_ID       = int(os.getenv("GROUP_ID", "0"))
 ADMIN_ID       = int(os.getenv("ADMIN_ID", "0"))
@@ -58,12 +44,33 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-BASE_COLS = 8
+BASE_COLS    = 8
+DAILY_TARGET = 2   # Kunlik maqsad
 
-# APScheduler OLIB TASHLANDI — Apps Script buni qiladi
 _gc: gspread.Client | None = None
 _registering: set[int] = set()
 _reg_lock = asyncio.Lock()
+
+
+# ===================== PROGRESS BAR =====================
+
+def progress_bar(count: int, target: int, width: int = 10) -> str:
+    """
+    count/target nisbatiga qarab ranglanadi:
+    < 50%  → 🟥
+    < 100% → 🟨
+    >= 100% → 🟩
+    """
+    ratio = min(count / target, 1.0) if target > 0 else 0
+    fill  = round(ratio * width)
+    color = "🟩" if ratio >= 1.0 else "🟨" if ratio >= 0.5 else "🟥"
+    return color * fill + "⬜" * (width - fill)
+
+
+def percent_bar(pct: int, width: int = 10) -> str:
+    fill  = min(round(pct / 100 * width), width)
+    color = "🟩" if pct >= 100 else "🟨" if pct >= 50 else "🟥"
+    return color * fill + "⬜" * (width - fill)
 
 
 # ===================== SHEETS =====================
@@ -71,14 +78,13 @@ _reg_lock = asyncio.Lock()
 def _get_gc() -> gspread.Client:
     global _gc
     if _gc is None:
-        b64  = os.getenv("GOOGLE_CREDENTIALS_B64")
+        b64   = os.getenv("GOOGLE_CREDENTIALS_B64")
         if not b64:
             raise RuntimeError("GOOGLE_CREDENTIALS_B64 topilmadi")
         info  = json.loads(base64.b64decode(b64).decode())
         creds = Credentials.from_service_account_info(info, scopes=SCOPES)
         _gc   = gspread.authorize(creds)
     return _gc
-
 
 def _ws() -> gspread.Worksheet:
     sh = _get_gc().open_by_key(SPREADSHEET_ID)
@@ -90,17 +96,14 @@ def _ws() -> gspread.Worksheet:
                        "Familiya", "Telefon raqami", "Qo'shilgan sana", "Holati"])
         return ws
 
-
 def _user_ws() -> gspread.Worksheet:
     return _get_gc().open_by_key(SPREADSHEET_ID).worksheet(USER_SHEET)
-
 
 def _find_row(ws: gspread.Worksheet, user_id: int) -> int | None:
     for i, v in enumerate(ws.col_values(2), start=1):
         if str(v).strip() == str(user_id):
             return i
     return None
-
 
 def _get_date_col(ws: gspread.Worksheet, date_str: str) -> int:
     headers = ws.row_values(1)
@@ -109,7 +112,6 @@ def _get_date_col(ws: gspread.Worksheet, date_str: str) -> int:
     new_col = len(headers) + 1
     ws.update_cell(1, new_col, date_str)
     return new_col
-
 
 def _col_letter(n: int) -> str:
     s = ""
@@ -123,17 +125,14 @@ def _col_letter(n: int) -> str:
 
 _local_counts: dict[int, dict] = {}
 
-
 def _local_get(user_id: int) -> int:
     data = _local_counts.get(user_id)
     if data and data.get("date") == today_str():
         return data.get("count", 0)
     return 0
 
-
 def _local_set(user_id: int, count: int) -> None:
     _local_counts[user_id] = {"date": today_str(), "count": count}
-
 
 def _write_to_sheet_sync(user_id: int, count: int) -> None:
     try:
@@ -160,21 +159,18 @@ def _register_sync(user_id: int, full_name: str, username: str) -> bool:
     all_vals    = sheet.get_all_values()
     headers     = all_vals[0] if all_vals else []
     valid_count = sum(1 for r in all_vals[1:] if len(r) > 1 and r[1].strip())
-    tr  = valid_count + 1
-    row = [str(tr), str(user_id), uname, ism, familiya, "", sana, "Faol"]
+    row = [str(valid_count + 1), str(user_id), uname, ism, familiya, "", sana, "Faol"]
     while len(row) < len(headers):
         row.append("")
     sheet.append_row(row, value_input_option="RAW")
     logger.info(f"Yangi sub_admin: {full_name} ({user_id})")
     return True
 
-
 def _set_status_sync(user_id: int, status: str) -> None:
     sheet = _ws()
     row   = _find_row(sheet, user_id)
     if row:
         sheet.update_cell(row, 8, status)
-
 
 async def register_user(user_id: int, full_name: str, username: str) -> bool:
     async with _reg_lock:
@@ -187,7 +183,6 @@ async def register_user(user_id: int, full_name: str, username: str) -> bool:
     finally:
         async with _reg_lock:
             _registering.discard(user_id)
-
 
 async def set_status(user_id: int, status: str) -> None:
     loop = asyncio.get_running_loop()
@@ -205,7 +200,6 @@ async def on_join(event: ChatMemberUpdated):
         with contextlib.suppress(Exception):
             await register_user(u.id, u.full_name or "", u.username or "")
 
-
 @router.chat_member(ChatMemberUpdatedFilter(IS_MEMBER >> IS_NOT_MEMBER))
 async def on_leave(event: ChatMemberUpdated):
     if event.chat.id != GROUP_ID:
@@ -214,7 +208,6 @@ async def on_leave(event: ChatMemberUpdated):
     if not u.is_bot:
         with contextlib.suppress(Exception):
             await set_status(u.id, "Chiqib ketdi")
-
 
 @router.message(F.chat.func(lambda c: c.id == GROUP_ID and GROUP_ID != 0), F.photo | F.document)
 async def handle_media(message: Message):
@@ -240,15 +233,17 @@ async def handle_media(message: Message):
         asyncio.get_running_loop().run_in_executor(None, _write_to_sheet_sync, u.id, count)
     )
 
+    bar   = progress_bar(count, DAILY_TARGET)
     emoji = "📸" if count == 1 else "✅" if count == 2 else "🔥"
-    text  = f"{emoji} <b>{u.full_name}</b>\n📊 Bugun: <b>{count}/2</b>"
-    if count == 2:
-        text += "\n\n🌟 Kunlik reja bajarildi!"
-    elif count > 2:
-        text += f"\n\n{count}-screenshot — zo'r!"
+    text  = f"{emoji} <b>{u.full_name}</b>\n{bar} <b>{count}/{DAILY_TARGET}</b>"
+    if count == DAILY_TARGET:
+        text += "\n🌟 <b>Kunlik reja bajarildi!</b>"
+    elif count > DAILY_TARGET:
+        text += f"\n🔥 {count}-screenshot — zo'r!"
+    else:
+        text += f"\n⏳ Yana {DAILY_TARGET - count} ta kerak"
     with contextlib.suppress(Exception):
         await message.reply(text, parse_mode="HTML")
-
 
 @router.message(F.chat.func(lambda c: c.id == GROUP_ID and GROUP_ID != 0), ~F.photo, ~F.document)
 async def handle_text(message: Message):
@@ -282,7 +277,6 @@ async def cmd_start_register(message: Message):
     with contextlib.suppress(Exception):
         await message.delete()
 
-
 @router.callback_query(F.data == "reg_me")
 async def cb_reg_me(callback: CallbackQuery):
     u = callback.from_user
@@ -302,16 +296,271 @@ def _mention(uid: str, name: str) -> str:
     safe = (name or "Xodim").replace("<", "").replace(">", "").strip() or "Xodim"
     return f'<a href="tg://user?id={uid}">{safe}</a>'
 
-
 async def _send_long(bot: Bot, chat_id: int, text: str) -> None:
     limit = 3800
     while text:
         if len(text) <= limit:
-            await bot.send_message(chat_id, text, parse_mode="HTML")
+            await bot.send_message(chat_id, text, parse_mode="HTML",
+                                   disable_web_page_preview=True)
             break
         cut  = text.rfind("\n", 0, limit) or limit
-        await bot.send_message(chat_id, text[:cut], parse_mode="HTML")
+        await bot.send_message(chat_id, text[:cut], parse_mode="HTML",
+                               disable_web_page_preview=True)
         text = text[cut:]
+
+
+# ===================== STATISTIKA (umumiy) =====================
+
+def _stats_sync(days: int) -> list[dict]:
+    sheet       = _ws()
+    headers     = sheet.row_values(1)
+    data        = sheet.get_all_records()
+    cutoff      = (now_tz() - timedelta(days=days - 1)).replace(
+                    hour=0, minute=0, second=0, microsecond=0)
+    valid_dates = []
+    for h in headers[BASE_COLS:]:
+        try:
+            dt = datetime.strptime(h, "%d.%m.%Y").replace(tzinfo=TZ)
+            if dt >= cutoff:
+                valid_dates.append(h)
+        except ValueError:
+            pass
+    result = []
+    for r in data:
+        if str(r.get("Holati", "")).strip() == "Chiqib ketdi":
+            continue
+        tg_id = str(r.get("Telegram ID", "")).strip()
+        if not tg_id:
+            continue
+        name  = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
+        total = sum(int(r[d]) if str(r.get(d, 0)).strip().isdigit() else 0
+                    for d in valid_dates)
+        result.append({"id": tg_id, "name": name, "total": total})
+    result.sort(key=lambda x: x["total"], reverse=True)
+    return result
+
+async def get_stats(days: int) -> list[dict]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _stats_sync, days)
+
+
+def _stat_text(stats: list[dict], label: str, days: int) -> str:
+    """Progress bar shaklidagi statistika matni."""
+    if not stats:
+        return f"📊 <b>{label} statistika</b>\n\nMa'lumot yo'q."
+
+    total_all = sum(u["total"] for u in stats)
+    ideal     = days * DAILY_TARGET          # Maksimal mumkin bo'lgan son
+    d_start   = (now_tz() - timedelta(days=days - 1)).strftime("%d.%m.%Y")
+    d_end     = now_tz().strftime("%d.%m.%Y")
+
+    # Umumiy foiz
+    max_possible = ideal * len(stats)
+    overall_pct  = int(total_all / max_possible * 100) if max_possible else 0
+
+    lines = [
+        f"📊 <b>{label} statistika</b>",
+        f"📅 {d_start} — {d_end}",
+        f"👥 {len(stats)} xodim | 📸 Jami: {total_all} ta",
+        f"{percent_bar(overall_pct)} {overall_pct}%",
+        "➖➖➖➖➖➖➖➖➖➖",
+    ]
+
+    medals = ["🥇", "🥈", "🥉"]
+    for i, u in enumerate(stats):
+        pct   = int(u["total"] / ideal * 100) if ideal else 0
+        bar   = progress_bar(u["total"], ideal)
+        medal = medals[i] if i < 3 else f"{i+1}."
+        lines.append(
+            f"\n{medal} {_mention(u['id'], u['name'])}\n"
+            f"   {bar} <b>{u['total']}/{ideal}</b> ({pct}%)"
+        )
+
+    return "\n".join(lines)
+
+
+def _stat_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📅 Kunlik",   callback_data="stat_daily"),
+            InlineKeyboardButton(text="📆 Haftalik", callback_data="stat_weekly"),
+            InlineKeyboardButton(text="🗓 Oylik",    callback_data="stat_monthly"),
+        ],
+        [
+            InlineKeyboardButton(text="🏆 Reyting",  callback_data="stat_rating"),
+            InlineKeyboardButton(text="❌ Yopish",   callback_data="stat_close"),
+        ],
+    ])
+
+
+@router.message(Command("reklama_stat"))
+async def cmd_stat(message: Message, bot: Bot):
+    if not message.from_user or message.from_user.id != ADMIN_ID:
+        return
+    await bot.send_message(
+        ADMIN_ID,
+        "📊 <b>Reklama statistikasi</b>\n\nQaysi davrni ko'rmoqchisiz?",
+        reply_markup=_stat_kb(), parse_mode="HTML",
+    )
+    with contextlib.suppress(Exception):
+        await message.delete()
+
+@router.callback_query(F.data.in_({"stat_daily", "stat_weekly", "stat_monthly",
+                                    "stat_rating", "stat_close"}))
+async def cb_stat(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        await call.answer("❌ Ruxsat yo'q!", show_alert=True)
+        return
+    if call.data == "stat_close":
+        with contextlib.suppress(Exception):
+            await call.message.delete()
+        return
+    if call.data == "stat_rating":
+        await call.answer("⏳ Reyting hisoblanmoqda...")
+        try:
+            text = await _build_rating_text(30)
+            await call.message.edit_text(text, reply_markup=_stat_kb(), parse_mode="HTML")
+        except Exception as e:
+            with contextlib.suppress(Exception):
+                await call.message.edit_text(f"❌ Xato: {e}", reply_markup=_stat_kb())
+        return
+
+    await call.answer("⏳ Hisoblanmoqda...")
+    days_map = {
+        "stat_daily":   (1,  "Kunlik"),
+        "stat_weekly":  (7,  "Haftalik"),
+        "stat_monthly": (30, "Oylik"),
+    }
+    days, label = days_map[call.data]
+    try:
+        stats = await get_stats(days)
+        await call.message.edit_text(
+            _stat_text(stats, label, days),
+            reply_markup=_stat_kb(), parse_mode="HTML",
+        )
+    except Exception as e:
+        with contextlib.suppress(Exception):
+            await call.message.edit_text(f"❌ Xato: {e}", reply_markup=_stat_kb())
+
+
+# ===================== REYTING TIZIMI =====================
+
+async def _build_rating_text(days: int = 30) -> str:
+    """
+    Top-3 xodim + barchaning progress bar ko'rinishi.
+    Oylik ideal = days * DAILY_TARGET (masalan 30*2=60).
+    """
+    stats = await get_stats(days)
+    if not stats:
+        return "🏆 <b>Reyting</b>\n\nMa'lumot yo'q."
+
+    ideal     = days * DAILY_TARGET
+    total_all = sum(u["total"] for u in stats)
+    d_start   = (now_tz() - timedelta(days=days - 1)).strftime("%d.%m.%Y")
+    d_end     = now_tz().strftime("%d.%m.%Y")
+
+    # ── TOP-3 alohida ajratilgan ──
+    medals     = ["🥇", "🥈", "🥉"]
+    top_lines  = []
+    for i, u in enumerate(stats[:3]):
+        pct   = int(u["total"] / ideal * 100) if ideal else 0
+        bar   = progress_bar(u["total"], ideal)
+        stars = "⭐" * (3 - i)
+        top_lines.append(
+            f"{medals[i]} {stars} {_mention(u['id'], u['name'])}\n"
+            f"   {bar} <b>{u['total']}/{ideal}</b> ({pct}%)"
+        )
+
+    # ── Qolganlar ──
+    rest_lines = []
+    for i, u in enumerate(stats[3:], start=4):
+        pct = int(u["total"] / ideal * 100) if ideal else 0
+        bar = progress_bar(u["total"], ideal)
+        rest_lines.append(
+            f"{i}. {_mention(u['id'], u['name'])}\n"
+            f"   {bar} {u['total']}/{ideal} ({pct}%)"
+        )
+
+    text = (
+        f"🏆 <b>OYLIK REYTING</b>\n"
+        f"📅 {d_start} — {d_end}\n"
+        f"👥 {len(stats)} xodim | 📸 Jami: {total_all} ta\n"
+        f"➖➖➖➖➖➖➖➖➖➖\n\n"
+        f"<b>🌟 TOP-3:</b>\n\n"
+        + "\n\n".join(top_lines)
+    )
+    if rest_lines:
+        text += "\n\n➖➖➖➖➖➖➖➖➖➖\n" + "\n\n".join(rest_lines)
+
+    return text
+
+
+@router.message(Command("reklama_reyting"))
+async def cmd_reyting(message: Message, bot: Bot):
+    """Oylik reytingni guruh va adminga yuboradi."""
+    if not message.from_user or message.from_user.id != ADMIN_ID:
+        return
+    msg = await message.answer("⏳ Reyting hisoblanmoqda...")
+    try:
+        text = await _build_rating_text(30)
+        # Guruhga
+        await _send_long(bot, GROUP_ID, text)
+        # Adminga ham
+        with contextlib.suppress(Exception):
+            await bot.send_message(ADMIN_ID, text, parse_mode="HTML",
+                                   disable_web_page_preview=True)
+        await msg.delete()
+    except Exception as e:
+        await msg.edit_text(f"❌ Xato: {e}")
+    with contextlib.suppress(Exception):
+        await message.delete()
+
+
+async def announce_monthly_rating(bot: Bot) -> None:
+    """
+    Har oyning oxirgi kunida (yoki Apps Script dan) chaqiriladi.
+    Guruhga tantanali e'lon qiladi.
+    """
+    stats = await get_stats(30)
+    if not stats or len(stats) < 1:
+        return
+
+    ideal    = 30 * DAILY_TARGET
+    medals   = ["🥇", "🥈", "🥉"]
+    d_end    = now_tz().strftime("%d.%m.%Y")
+    d_start  = (now_tz() - timedelta(days=29)).strftime("%d.%m.%Y")
+
+    # Tantanali sarlavha
+    header = (
+        f"🎉 <b>OY REYTINGI E'LON QILINMOQDA!</b>\n"
+        f"📅 {d_start} — {d_end}\n\n"
+        f"📸 Eng ko'p reklama tarqatgan xodimlar:\n\n"
+    )
+
+    top_lines = []
+    for i, u in enumerate(stats[:3]):
+        pct  = int(u["total"] / ideal * 100) if ideal else 0
+        bar  = progress_bar(u["total"], ideal)
+        congrats = (
+            "🎊 <b>1-o'rin — CHAMPION!</b>" if i == 0 else
+            "🎊 <b>2-o'rin — Ajoyib!</b>"   if i == 1 else
+            "🎊 <b>3-o'rin — Zo'r!</b>"
+        )
+        top_lines.append(
+            f"{medals[i]} {_mention(u['id'], u['name'])}\n"
+            f"   {congrats}\n"
+            f"   {bar} <b>{u['total']}/{ideal}</b> ({pct}%)"
+        )
+
+    footer = (
+        "\n\n👏 <b>Barcha ishtirokchilar rahmat!</b>\n"
+        f"Keyingi oy ham davom eting! 💪\n"
+        f"📌 {CHANNEL_LINK}"
+    )
+
+    text = header + "\n\n".join(top_lines) + footer
+    with contextlib.suppress(TelegramForbiddenError):
+        await _send_long(bot, GROUP_ID, text)
 
 
 # ===================== QOLDA NAZORAT =====================
@@ -329,7 +578,8 @@ async def check_screenshots(bot: Bot) -> None:
     if not data:
         if ADMIN_ID:
             with contextlib.suppress(Exception):
-                await bot.send_message(ADMIN_ID, "⚠️ sub_adminlar da hech kim yo'q!\n/start_register yuboring.")
+                await bot.send_message(
+                    ADMIN_ID, "⚠️ sub_adminlar da hech kim yo'q!\n/start_register yuboring.")
         return
 
     today     = today_str()
@@ -351,146 +601,56 @@ async def check_screenshots(bot: Bot) -> None:
             from_local = 0
         cnt  = max(from_sheet, from_local)
         name = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
-        (done_list if cnt >= 2 else debtors).append({"id": tg_id, "name": name, "count": cnt})
+        (done_list if cnt >= DAILY_TARGET else debtors).append(
+            {"id": tg_id, "name": name, "count": cnt})
 
-    total     = len(done_list) + len(debtors)
-    completed = len(done_list)
-    percent   = int(completed / total * 100) if total else 0
+    total    = len(done_list) + len(debtors)
+    done_cnt = len(done_list)
+    pct      = int(done_cnt / total * 100) if total else 0
+
+    # ── Umumiy holat + progress bar ──
+    lines = [
+        f"📊 <b>NAZORAT — {time_str}</b>",
+        f"📅 {today}\n",
+        f"{percent_bar(pct)} <b>{pct}%</b>",
+        f"👥 Jami: {total}  ✅ {done_cnt}  ❌ {len(debtors)}",
+    ]
+
+    if done_list:
+        lines.append("\n✅ <b>Bajardilar:</b>")
+        for u in done_list:
+            bar = progress_bar(u["count"], DAILY_TARGET)
+            lines.append(f"{_mention(u['id'], u['name'])}\n   {bar} <b>{u['count']}/{DAILY_TARGET}</b>")
 
     if debtors:
-        done_text = ""
-        if done_list:
-            done_text  = "\n✅ <b>Bajarganlar:</b>\n"
-            done_text += "".join(f"  ✔️ {_mention(u['id'], u['name'])} — {u['count']}/2\n" for u in done_list)
-        debtor_text = "\n❌ <b>BAJARMAGAN XODIMLAR:</b>\n"
+        lines.append("\n❌ <b>Bajarmadi:</b>")
         for i, u in enumerate(debtors, 1):
-            note = "bitta yetishmayapti ⚠️" if u["count"] == 1 else "hali birorta ham yo'q 🚫"
-            debtor_text += f"\n{i}. {_mention(u['id'], u['name'])}\n   📸 {u['count']}/2 — {note}\n"
-        text = (
-            f"🚨 <b>NAZORAT — {time_str}</b>\n📅 {today}\n\n"
-            f"👥 Faol: {total} | ✅ {completed} | ❌ {len(debtors)}\n📊 {percent}%\n"
-            + done_text + debtor_text
-            + f"\n➖➖➖➖➖➖➖➖➖➖\n"
-            f"❗ <b>Reklama tarqatib screenshot yuborsin!</b>\n📌 {CHANNEL_LINK}"
-        )
-        try:
-            await _send_long(bot, GROUP_ID, text)
-        except TelegramForbiddenError:
-            logger.error("Guruhda yozish taqiqlangan!")
-    else:
-        done_text = "\n".join(
-            f"  ✔️ {_mention(u['id'], u['name'])} — {u['count']}/2" for u in done_list
-        )
-        with contextlib.suppress(Exception):
-            await bot.send_message(
-                GROUP_ID,
-                f"🏆 <b>AJOYIB! — {time_str}</b>\n\n✅ Barcha rejani bajardi!\n\n{done_text}\n\n👏 Rahmat!",
-                parse_mode="HTML",
+            bar  = progress_bar(u["count"], DAILY_TARGET)
+            note = f"yana {DAILY_TARGET - u['count']} ta ⚠️" if u["count"] > 0 else "hali boshlamadi 🚫"
+            lines.append(
+                f"{i}. {_mention(u['id'], u['name'])}\n"
+                f"   {bar} {u['count']}/{DAILY_TARGET} — {note}"
             )
+        lines += [
+            f"\n➖➖➖➖➖➖➖➖➖➖",
+            f"❗ <b>Reklama tarqatib screenshot yuborsin!</b>",
+            f"📌 {CHANNEL_LINK}",
+        ]
+
+    try:
+        await _send_long(bot, GROUP_ID, "\n".join(lines))
+    except TelegramForbiddenError:
+        logger.error("Guruhda yozish taqiqlangan!")
 
     if ADMIN_ID:
         with contextlib.suppress(Exception):
             await bot.send_message(
                 ADMIN_ID,
-                f"📊 <b>Admin — {time_str}</b>\n👥 {total} | ✅ {completed} | ❌ {len(debtors)} | 📈 {percent}%",
+                f"📊 <b>{time_str}</b>\n"
+                f"{percent_bar(pct)} {pct}%\n"
+                f"✅ {done_cnt}  ❌ {len(debtors)} / {total}",
                 parse_mode="HTML",
             )
-
-
-# ===================== STATISTIKA =====================
-
-def _stats_sync(days: int) -> list[dict]:
-    sheet       = _ws()
-    headers     = sheet.row_values(1)
-    data        = sheet.get_all_records()
-    cutoff      = (now_tz() - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    valid_dates = []
-    for h in headers[BASE_COLS:]:
-        try:
-            dt = datetime.strptime(h, "%d.%m.%Y").replace(tzinfo=TZ)
-            if dt >= cutoff:
-                valid_dates.append(h)
-        except ValueError:
-            pass
-    result = []
-    for r in data:
-        if str(r.get("Holati", "")).strip() == "Chiqib ketdi":
-            continue
-        tg_id = str(r.get("Telegram ID", "")).strip()
-        if not tg_id:
-            continue
-        name  = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
-        total = sum(int(r[d]) if str(r.get(d, 0)).strip().isdigit() else 0 for d in valid_dates)
-        result.append({"id": tg_id, "name": name, "total": total})
-    result.sort(key=lambda x: x["total"], reverse=True)
-    return result
-
-
-async def get_stats(days: int) -> list[dict]:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _stats_sync, days)
-
-
-def _stat_text(stats: list[dict], label: str, days: int) -> str:
-    if not stats:
-        return f"📊 <b>{label} statistika</b>\n\nMa'lumot yo'q."
-    total_all = sum(u["total"] for u in stats)
-    d_start   = (now_tz() - timedelta(days=days - 1)).strftime("%d.%m.%Y")
-    d_end     = now_tz().strftime("%d.%m.%Y")
-    lines = []
-    for i, u in enumerate(stats, 1):
-        filled = min(u["total"], 10)
-        bar    = "🟩" * filled + "⬜" * (10 - filled)
-        lines.append(f"{i}. {_mention(u['id'], u['name'])}\n   {bar} <b>{u['total']}</b> ta")
-    return (
-        f"📊 <b>{label} statistika</b>\n📅 {d_start} — {d_end}\n\n"
-        f"👥 {len(stats)} xodim | 📸 Jami: {total_all} ta\n➖➖➖➖➖➖➖➖➖➖\n\n"
-        + "\n\n".join(lines)
-    )
-
-
-def _stat_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📅 Kunlik",   callback_data="stat_daily"),
-            InlineKeyboardButton(text="📆 Haftalik", callback_data="stat_weekly"),
-            InlineKeyboardButton(text="🗓 Oylik",    callback_data="stat_monthly"),
-        ],
-        [InlineKeyboardButton(text="❌ Yopish", callback_data="stat_close")],
-    ])
-
-
-@router.message(Command("reklama_stat"))
-async def cmd_stat(message: Message, bot: Bot):
-    if not message.from_user or message.from_user.id != ADMIN_ID:
-        return
-    await bot.send_message(
-        ADMIN_ID,
-        "📊 <b>Reklama statistikasi</b>\n\nQaysi davrni ko'rmoqchisiz?",
-        reply_markup=_stat_kb(), parse_mode="HTML",
-    )
-    with contextlib.suppress(Exception):
-        await message.delete()
-
-
-@router.callback_query(F.data.in_({"stat_daily", "stat_weekly", "stat_monthly", "stat_close"}))
-async def cb_stat(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        await call.answer("❌ Ruxsat yo'q!", show_alert=True)
-        return
-    if call.data == "stat_close":
-        with contextlib.suppress(Exception):
-            await call.message.delete()
-        return
-    await call.answer("⏳ Hisoblanmoqda...")
-    days_map = {"stat_daily": (1, "Kunlik"), "stat_weekly": (7, "Haftalik"), "stat_monthly": (30, "Oylik")}
-    days, label = days_map[call.data]
-    try:
-        stats = await get_stats(days)
-        await call.message.edit_text(_stat_text(stats, label, days), reply_markup=_stat_kb(), parse_mode="HTML")
-    except Exception as e:
-        with contextlib.suppress(Exception):
-            await call.message.edit_text(f"❌ Xato: {e}", reply_markup=_stat_kb())
 
 
 # ===================== ADMIN BUYRUQLARI =====================
@@ -526,7 +686,7 @@ async def cmd_users(message: Message):
         await message.answer(f"❌ Xato: {e}")
         return
     today = today_str()
-    text  = "👥 <b>Faol xodimlar:</b>\n\n"
+    lines = ["👥 <b>Faol xodimlar bugun:</b>\n"]
     count = 0
     for r in data:
         if str(r.get("Holati", "")).strip() == "Chiqib ketdi":
@@ -537,15 +697,16 @@ async def cmd_users(message: Message):
         cnt_raw = r.get(today, 0)
         cnt     = int(cnt_raw) if str(cnt_raw).strip().isdigit() else 0
         name    = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
-        emoji   = "✅" if cnt >= 2 else "⚠️" if cnt == 1 else "❌"
-        text   += f"{emoji} <b>{name}</b> — 📸 {cnt}/2\n"
-        count  += 1
+        bar     = progress_bar(cnt, DAILY_TARGET)
+        emoji   = "✅" if cnt >= DAILY_TARGET else "⚠️" if cnt > 0 else "❌"
+        lines.append(f"{emoji} <b>{name}</b>\n   {bar} {cnt}/{DAILY_TARGET}")
+        count += 1
         if count >= 30:
             break
     if count == 0:
         await message.answer("❌ Faol xodimlar yo'q")
         return
-    sent = await message.answer(text, parse_mode="HTML")
+    sent = await message.answer("\n".join(lines), parse_mode="HTML")
     with contextlib.suppress(Exception):
         await message.delete()
     await asyncio.sleep(60)
@@ -576,7 +737,7 @@ async def cmd_sync(message: Message, bot: Bot):
                 changed = False
                 for ui, sc in [(2, 3), (3, 4), (4, 5), (5, 6)]:
                     cur = str(row[sc - 1]).strip() if len(row) > sc - 1 else ""
-                    src = str(u[ui]).strip()        if len(u)   > ui      else ""
+                    src = str(u[ui]).strip()        if len(u) > ui else ""
                     if not cur and src:
                         subws.update_cell(i, sc, src)
                         changed = True
@@ -601,17 +762,17 @@ async def cmd_help(message: Message):
         "<b>Xodimlar:</b>\n"
         "• Guruhga rasm yuboring — bot hisoblaydi\n"
         "• Har kuni kamida 2 ta rasm kerak\n\n"
-        "<b>Admin buyruqlari (bot):</b>\n"
+        "<b>Admin buyruqlari:</b>\n"
         "/start_register — Barchani ro'yxatdan o'tkazish\n"
         "/reklama_tekshir — Qo'lda nazorat\n"
-        "/reklama_stat — Statistika\n"
-        "/reklama_users — Faol xodimlar\n"
+        "/reklama_stat — Statistika (kunlik/haftalik/oylik)\n"
+        "/reklama_reyting — Oylik reyting e'lon qilish\n"
+        "/reklama_users — Faol xodimlar (progress bar)\n"
         "/sync_subadmin — User → sub_admin sinxronlash\n\n"
         "<b>Avtomatik (Apps Script):</b>\n"
-        "⏰ 09:30, 15:00 — Nazorat xabari\n"
-        "📆 Har dushanba 09:00 — Haftalik stat\n"
-        "🗓 Har oyning 1-si 09:00 — Oylik stat\n"
-        "📅 Har kuni 08:00 — Yangi kun ustuni",
+        "⏰ 09:30, 15:00 — Nazorat + progress bar\n"
+        "📆 Har dushanba 09:00 — Haftalik reyting\n"
+        "🗓 Har oyning 1-si 09:00 — Oylik reyting 🏆",
         parse_mode="HTML",
     )
     with contextlib.suppress(Exception):

@@ -55,12 +55,6 @@ _reg_lock = asyncio.Lock()
 # ===================== PROGRESS BAR =====================
 
 def progress_bar(count: int, target: int, width: int = 10) -> str:
-    """
-    count/target nisbatiga qarab ranglanadi:
-    < 50%  → 🟥
-    < 100% → 🟨
-    >= 100% → 🟩
-    """
     ratio = min(count / target, 1.0) if target > 0 else 0
     fill  = round(ratio * width)
     color = "🟩" if ratio >= 1.0 else "🟨" if ratio >= 0.5 else "🟥"
@@ -168,6 +162,33 @@ def _col_letter(n: int) -> str:
         n, r = divmod(n - 1, 26)
         s = chr(65 + r) + s
     return s
+
+
+def _safe_records(ws: gspread.Worksheet) -> list[dict]:
+    """
+    get_all_records() dublikat sarlavhada xato beradi.
+    Shuning uchun get_all_values() ishlatamiz va o'zimiz dict yasaymiz.
+    Dublikat ustunlarda oxirgisi qaytariladi — shuning uchun
+    avval _cleanup_duplicate_cols_sync() chaqirilishi kerak.
+    """
+    all_vals = ws.get_all_values()
+    if len(all_vals) < 2:
+        return []
+    headers = all_vals[0]
+    result  = []
+    for row in all_vals[1:]:
+        # Bo'sh qatorlarni o'tkazib yuboramiz
+        if not any(str(c).strip() for c in row[:8]):
+            continue
+        # Pad qisqa qatorlarni
+        padded = row + [""] * (len(headers) - len(row))
+        d = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if h:
+                d[h] = padded[i]
+        result.append(d)
+    return result
 
 
 # ===================== LOCAL KESH =====================
@@ -359,20 +380,46 @@ async def handle_media(message: Message):
     emoji = "📸" if count == 1 else "✅" if count == 2 else "🔥"
     text  = f"{emoji} <b>{u.full_name}</b>\n{bar} <b>{count}/{DAILY_TARGET}</b>"
 
+    ragbat_done = [
+        "✦ Tizim qayd etdi: kunlik vazifa bajarildi. Faoliyat hisobga olindi.",
+        "✦ Monitoring tasdiqladi: 2/2. Siz kuzatuv tizimida yashil holatdasiz.",
+        "✦ Nazorat tizimi: reja yopildi. Xodim faoliyati — normada.",
+        "✦ Tizim hisobi: bugungi majburiyat bajarildi. Natija bazaga yozildi.",
+    ]
+    ragbat_over = [
+        "✦ Tizim qayd etdi: reja oshib ketdi. Qo'shimcha faoliyat hisobga olindi.",
+        "✦ Monitoring: rejadan ortiq natija. Siz bugun tizimda lider holatdasiz.",
+        "✦ Nazorat tizimi: {count} ta screenshot — yuqori faollik. Oy reytingida hisoblanmoqda.",
+        "✦ Tizim: norm oshildi. Bunday xodimlar alohida e'tiborga olinadi.",
+    ]
+    import random
     if count == DAILY_TARGET:
+        msg = random.choice(ragbat_done)
         text += (
-            "\n🌟 <b>Kunlik reja bajarildi!</b>"
-            "\n💪 Zo'r natija — davom eting!"
+            f"\n✅ <b>Kunlik reja bajarildi.</b>"
+            f"\n🤖 <i>{msg}</i>"
         )
     elif count > DAILY_TARGET:
+        msg = random.choice(ragbat_over).replace("{count}", str(count))
         text += (
-            f"\n🔥 <b>{count}-screenshot</b> — zo'rsiz!"
-            "\n🏆 Siz reytingda oldinga chiqyapsiz!"
+            f"\n🏆 <b>{count}-screenshot — rejadan oshib ketdingiz.</b>"
+            f"\n🤖 <i>{msg}</i>"
         )
     else:
         remaining = DAILY_TARGET - count
+        roasts = [
+            "⚡ Tizim ogohlantiradi: vazifa bajarilmagan. Holat — qizil.",
+            "⚡ Nazorat tizimi: bugungi faollik nolda. Bu hisobotga tushadi.",
+            "⚡ Monitoring: siz hali ro'yxatda ko'rinmayapsiz. Darhol harakat talab etiladi.",
+            "⚡ Tizim qayd etdi: {remaining} ta vazifa bajarilmagan. Vaqt — cheklangan.",
+            "⚡ Diqqat: bajarilmagan vazifalar oy reytingida avtomatik hisoblanadi.",
+            "⚡ Nazorat tizimi: faolsizlik aniqlandi. Keyingi tekshiruvda holat qayta baholanadi.",
+        ]
+        import random
+        roast = random.choice(roasts).replace("{remaining}", str(remaining))
         text += (
-            f"\n⏳ Yana <b>{remaining} ta</b> kerak"
+            f"\n⏳ Yana <b>{remaining} ta</b> kerak."
+            f"\n🤖 <i>{roast}</i>"
             f"\n📌 {CHANNEL_LINK}"
         )
     with contextlib.suppress(Exception):
@@ -447,7 +494,7 @@ async def _send_long(bot: Bot, chat_id: int, text: str) -> None:
 def _stats_sync(days: int) -> list[dict]:
     sheet       = _ws()
     headers     = sheet.row_values(1)
-    data        = sheet.get_all_records()
+    data        = _safe_records(sheet)
     cutoff      = (now_tz() - timedelta(days=days - 1)).replace(
                     hour=0, minute=0, second=0, microsecond=0)
     valid_dates = []
@@ -703,7 +750,7 @@ async def check_screenshots(bot: Bot) -> None:
         return
     try:
         loop = asyncio.get_running_loop()
-        data = await loop.run_in_executor(None, lambda: _ws().get_all_records())
+        data = await loop.run_in_executor(None, lambda: _safe_records(_ws()))
     except Exception as e:
         logger.error(f"Sheets o'qishda xato: {e}")
         return
@@ -814,7 +861,7 @@ async def cmd_users(message: Message):
         return
     try:
         loop = asyncio.get_running_loop()
-        data = await loop.run_in_executor(None, lambda: _ws().get_all_records())
+        data = await loop.run_in_executor(None, lambda: _safe_records(_ws()))
     except Exception as e:
         await message.answer(f"❌ Xato: {e}")
         return

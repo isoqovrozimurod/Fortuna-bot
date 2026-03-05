@@ -49,6 +49,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="reklama_stat",     description="Statistika"),
         BotCommand(command="reklama_users",    description="Foydalanuvchilar"),
         BotCommand(command="reklama_help",     description="Yordam"),
+        BotCommand(command="reklama_reyting", description="Oylik reyting 🏆"),
     ]
 
     # =================== O'RNATISH ===================

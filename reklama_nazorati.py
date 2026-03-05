@@ -122,6 +122,9 @@ def _col_letter(n: int) -> str:
 
 
 # ===================== LOCAL KESH =====================
+# Cache faqat tezlik uchun — Sheets ASOSIY manba.
+# Bot restart bo'lsa cache tozalanadi, shuning uchun
+# har safar Sheets dan o'qib, ustiga +1 qo'shamiz.
 
 _local_counts: dict[int, dict] = {}
 
@@ -129,20 +132,45 @@ def _local_get(user_id: int) -> int:
     data = _local_counts.get(user_id)
     if data and data.get("date") == today_str():
         return data.get("count", 0)
-    return 0
+    return -1   # -1 = keshda yo'q, Sheets dan o'qish kerak
 
 def _local_set(user_id: int, count: int) -> None:
     _local_counts[user_id] = {"date": today_str(), "count": count}
 
-def _write_to_sheet_sync(user_id: int, count: int) -> None:
+def _read_sheet_count_sync(user_id: int) -> int:
+    """Sheets dagi bugungi son — kesh yo'q bo'lganda chaqiriladi."""
     try:
         sheet    = _ws()
         date_col = _get_date_col(sheet, today_str())
         row      = _find_row(sheet, user_id)
-        if row:
-            sheet.update_cell(row, date_col, count)
+        if not row:
+            return 0
+        val = sheet.cell(row, date_col).value
+        return int(val) if val and str(val).strip().isdigit() else 0
     except Exception as e:
-        logger.error(f"Sheets yozishda xato ({user_id}): {e}")
+        logger.error(f"Sheets o'qishda xato ({user_id}): {e}")
+        return 0
+
+def _increment_sheet_sync(user_id: int) -> int:
+    """
+    Sheets dan hozirgi qiymatni o'qiydi, +1 qo'shib yozadi.
+    Atomik emas lekin bot single-process bo'lgani uchun yetarli.
+    Yangi qiymatni qaytaradi.
+    """
+    try:
+        sheet    = _ws()
+        date_col = _get_date_col(sheet, today_str())
+        row      = _find_row(sheet, user_id)
+        if not row:
+            return 0
+        val     = sheet.cell(row, date_col).value
+        current = int(val) if val and str(val).strip().isdigit() else 0
+        next_   = current + 1
+        sheet.update_cell(row, date_col, next_)
+        return next_
+    except Exception as e:
+        logger.error(f"Sheets increment xato ({user_id}): {e}")
+        return 0
 
 
 # ===================== RO'YXATGA OLISH =====================
@@ -226,12 +254,20 @@ async def handle_media(message: Message):
     with contextlib.suppress(Exception):
         await register_user(u.id, u.full_name or "", u.username or "")
 
-    count = _local_get(u.id) + 1
-    _local_set(u.id, count)
+    cached = _local_get(u.id)   # -1 = keshda yoq (bot restart bolgan)
+    loop   = asyncio.get_running_loop()
 
-    asyncio.create_task(
-        asyncio.get_running_loop().run_in_executor(None, _write_to_sheet_sync, u.id, count)
-    )
+    if cached >= 0:
+        # Keshda bor — Sheets ga async +1 yozamiz
+        count = cached + 1
+        _local_set(u.id, count)
+        asyncio.create_task(
+            loop.run_in_executor(None, _increment_sheet_sync, u.id)
+        )
+    else:
+        # Keshda yoq — Sheets dan hozirgi qiymatni oqib +1 qoshamiz
+        count = await loop.run_in_executor(None, _increment_sheet_sync, u.id)
+        _local_set(u.id, count)
 
     bar   = progress_bar(count, DAILY_TARGET)
     emoji = "📸" if count == 1 else "✅" if count == 2 else "🔥"

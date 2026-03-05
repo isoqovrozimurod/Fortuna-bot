@@ -105,13 +105,62 @@ def _find_row(ws: gspread.Worksheet, user_id: int) -> int | None:
             return i
     return None
 
+# Ustun yaratish uchun lock — Apps Script va bot bir vaqtda yaratmasin
+_col_lock = asyncio.Lock()
+
 def _get_date_col(ws: gspread.Worksheet, date_str: str) -> int:
+    """
+    Bugungi sana ustunini topadi yoki yaratadi.
+    MUHIM: chaqirishdan oldin _col_lock ni olish kerak (async kontekstda).
+    Sync kontekstda (run_in_executor) to'g'ridan chaqiriladi —
+    shuning uchun Sheets dan qayta o'qib tekshiramiz.
+    """
+    # Sheets dan fresh o'qiymiz — kesh emas
     headers = ws.row_values(1)
-    if date_str in headers:
-        return headers.index(date_str) + 1
+    # Duplicate bo'lsa birinchisini qaytaramiz
+    for i, h in enumerate(headers):
+        if str(h).strip() == date_str:
+            return i + 1
+    # Yo'q — yangi ustun
     new_col = len(headers) + 1
     ws.update_cell(1, new_col, date_str)
     return new_col
+
+
+def _cleanup_duplicate_cols_sync() -> int:
+    """
+    Bir xil sana ustunlari bo'lsa ikkinchisini o'chiradi.
+    Sheets da N va O da bir xil sana bo'lsa — O ustunidagi
+    qiymatlarni N ga qo'shib, O ni o'chiradi.
+    """
+    sheet   = _ws()
+    headers = sheet.row_values(1)
+    seen    = {}
+    removed = 0
+    # O'ngdan chapga — dublikatlarni topamiz
+    for i, h in enumerate(headers):
+        h = str(h).strip()
+        if not h:
+            continue
+        if h in seen:
+            # Dublikat topildi — merge qilamiz
+            first_col = seen[h]   # 1-based
+            dupe_col  = i + 1     # 1-based
+            last_row  = sheet.lastrow if hasattr(sheet, "lastrow") else sheet.row_count
+            all_vals  = sheet.get_all_values()
+            for row_i, row in enumerate(all_vals[1:], start=2):
+                first_val = int(row[first_col-1]) if len(row) >= first_col and str(row[first_col-1]).strip().isdigit() else 0
+                dupe_val  = int(row[dupe_col-1])  if len(row) >= dupe_col  and str(row[dupe_col-1]).strip().isdigit()  else 0
+                if dupe_val > 0:
+                    sheet.update_cell(row_i, first_col, first_val + dupe_val)
+            # Dublikat ustunni bo'shamiz (sarlavhasini ham)
+            last_row_idx = len(all_vals)
+            if last_row_idx > 0:
+                sheet.batch_clear([f"{_col_letter(dupe_col)}1:{_col_letter(dupe_col)}{last_row_idx}"])
+            removed += 1
+        else:
+            seen[h] = i + 1
+    return removed
 
 def _col_letter(n: int) -> str:
     s = ""
@@ -127,15 +176,33 @@ def _col_letter(n: int) -> str:
 # har safar Sheets dan o'qib, ustiga +1 qo'shamiz.
 
 _local_counts: dict[int, dict] = {}
+# Bugungi yuborilgan file_unique_id lar — dublikatni aniqlash uchun
+_seen_files: dict[int, set] = {}
 
 def _local_get(user_id: int) -> int:
     data = _local_counts.get(user_id)
     if data and data.get("date") == today_str():
         return data.get("count", 0)
-    return -1   # -1 = keshda yo'q, Sheets dan o'qish kerak
+    return -1   # -1 = keshda yoq, Sheets dan oqish kerak
 
 def _local_set(user_id: int, count: int) -> None:
     _local_counts[user_id] = {"date": today_str(), "count": count}
+
+def _is_duplicate(user_id: int, file_unique_id: str) -> bool:
+    """Bugun shu faylni yuborgan-yubormaganini tekshiradi."""
+    today = today_str()
+    rec   = _seen_files.get(user_id)
+    if rec is None or rec.get("date") != today:
+        _seen_files[user_id] = {"date": today, "files": set()}
+    return file_unique_id in _seen_files[user_id]["files"]
+
+def _mark_seen(user_id: int, file_unique_id: str) -> None:
+    """Faylni korilgan deb belgilaydi."""
+    today = today_str()
+    rec   = _seen_files.get(user_id)
+    if rec is None or rec.get("date") != today:
+        _seen_files[user_id] = {"date": today, "files": set()}
+    _seen_files[user_id]["files"].add(file_unique_id)
 
 def _read_sheet_count_sync(user_id: int) -> int:
     """Sheets dagi bugungi son — kesh yo'q bo'lganda chaqiriladi."""
@@ -254,11 +321,29 @@ async def handle_media(message: Message):
     with contextlib.suppress(Exception):
         await register_user(u.id, u.full_name or "", u.username or "")
 
+    # ── Duplicate tekshiruv ──────────────────────────────────────
+    # Eng katta rasmning file_unique_id ni olamiz
+    if message.photo:
+        file_uid = message.photo[-1].file_unique_id
+    else:
+        file_uid = message.document.file_unique_id
+
+    if _is_duplicate(u.id, file_uid):
+        with contextlib.suppress(Exception):
+            await message.reply(
+                "⚠️ <b>Bu rasmni bugun allaqachon yuborgansiz!</b>\n"
+                "Yangi reklama screenshotini yuboring.",
+                parse_mode="HTML",
+            )
+        return
+
+    _mark_seen(u.id, file_uid)
+
+    # ── Hisoblash ────────────────────────────────────────────────
     cached = _local_get(u.id)   # -1 = keshda yoq (bot restart bolgan)
     loop   = asyncio.get_running_loop()
 
     if cached >= 0:
-        # Keshda bor — Sheets ga async +1 yozamiz
         count = cached + 1
         _local_set(u.id, count)
         asyncio.create_task(
@@ -269,17 +354,29 @@ async def handle_media(message: Message):
         count = await loop.run_in_executor(None, _increment_sheet_sync, u.id)
         _local_set(u.id, count)
 
+    # ── Javob ────────────────────────────────────────────────────
     bar   = progress_bar(count, DAILY_TARGET)
     emoji = "📸" if count == 1 else "✅" if count == 2 else "🔥"
     text  = f"{emoji} <b>{u.full_name}</b>\n{bar} <b>{count}/{DAILY_TARGET}</b>"
+
     if count == DAILY_TARGET:
-        text += "\n🌟 <b>Kunlik reja bajarildi!</b>"
+        text += (
+            "\n🌟 <b>Kunlik reja bajarildi!</b>"
+            "\n💪 Zo'r natija — davom eting!"
+        )
     elif count > DAILY_TARGET:
-        text += f"\n🔥 {count}-screenshot — zo'r!"
+        text += (
+            f"\n🔥 <b>{count}-screenshot</b> — zo'rsiz!"
+            "\n🏆 Siz reytingda oldinga chiqyapsiz!"
+        )
     else:
-        text += f"\n⏳ Yana {DAILY_TARGET - count} ta kerak"
+        remaining = DAILY_TARGET - count
+        text += (
+            f"\n⏳ Yana <b>{remaining} ta</b> kerak"
+            f"\n📌 {CHANNEL_LINK}"
+        )
     with contextlib.suppress(Exception):
-        await message.reply(text, parse_mode="HTML")
+        await message.reply(text, parse_mode="HTML", disable_web_page_preview=True)
 
 @router.message(F.chat.func(lambda c: c.id == GROUP_ID and GROUP_ID != 0), ~F.photo, ~F.document)
 async def handle_text(message: Message):
@@ -783,6 +880,25 @@ async def cmd_sync(message: Message, bot: Bot):
         loop    = asyncio.get_running_loop()
         updated = await loop.run_in_executor(None, _sync)
         await msg.edit_text(f"✅ Sinxronlash yakunlandi! {updated} ta qator yangilandi.")
+    except Exception as e:
+        await msg.edit_text(f"❌ Xato: {e}")
+    with contextlib.suppress(Exception):
+        await message.delete()
+
+
+@router.message(Command("reklama_tozala"))
+async def cmd_cleanup_dupes(message: Message):
+    """Sheets dagi takroriy sana ustunlarini birlashtiradi."""
+    if not message.from_user or message.from_user.id != ADMIN_ID:
+        return
+    msg = await message.answer("🧹 Dublikat ustunlar tekshirilmoqda...")
+    try:
+        loop    = asyncio.get_running_loop()
+        removed = await loop.run_in_executor(None, _cleanup_duplicate_cols_sync)
+        if removed:
+            await msg.edit_text(f"✅ {removed} ta dublikat ustun tozalandi!")
+        else:
+            await msg.edit_text("✅ Dublikat ustun topilmadi.")
     except Exception as e:
         await msg.edit_text(f"❌ Xato: {e}")
     with contextlib.suppress(Exception):

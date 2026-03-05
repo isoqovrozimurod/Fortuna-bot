@@ -38,6 +38,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="download",      description="Ma'lumot va fayllarni yuklab olish"),
         BotCommand(command="reklama_stat",   description="Reklama statistikasi"),
         BotCommand(command="sync_subadmin",  description="User dan sub_admin ga sinxronlash"),
+        BotCommand(command="reklama_tozala",   description="Dublikat ustunlarni tozalash 🧹"),
         BotCommand(command="filiallar",   description="Filiallar ro'yxati"),
         BotCommand(command="refresh_branches", description="Filiallarni yangilash"),
     ]

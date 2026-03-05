@@ -367,7 +367,7 @@ async def handle_media(message: Message):
     if cached >= 0:
         count = cached + 1
         _local_set(u.id, count)
-        asyncio.create_task(
+        asyncio.ensure_future(
             loop.run_in_executor(None, _increment_sheet_sync, u.id)
         )
     else:

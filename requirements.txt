@@ -23,7 +23,7 @@ supabase==2.4.0
 # Geo
 geopy==2.4.1
 
-# Optional (faqat ishlatsang qolsin)
 matplotlib==3.8.4
+Pillow
 
 openpyxl

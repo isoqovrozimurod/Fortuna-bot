@@ -1,11 +1,10 @@
 from __future__ import annotations
 import io, uuid, re, asyncio
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from typing import List
 from datetime import datetime
 from functools import partial
+
+from PIL import Image, ImageDraw, ImageFont
 
 from aiogram import Router, F, Bot, types
 from aiogram.enums import ParseMode
@@ -17,7 +16,6 @@ from aiogram.types import (
 )
 
 router = Router()
-_plt_lock = asyncio.Lock()  # matplotlib thread-safe emas
 
 class CalcFSM(StatesGroup):
     year  = State()
@@ -89,76 +87,96 @@ def diff_table(pr: int, rate: float, m: int, grace_days: int = 0) -> List[List]:
     return rows
 
 
-# ── PNG generatsiya — executor da ishlaydi ────────────────────────
+# ── Pillow bilan jadval chizish — tez ─────────────────────────────
 
 def _draw_png_sync(rows: List[List], title: str, kredit_summa: float) -> bytes:
-    """Sinxron — run_in_executor orqali chaqiriladi."""
-    headers = ["Sana", "Foizlar", "Asosiy qarz", "Oylik to'lov", "Qoldiq summa"]
-    body    = [headers]
+    HEADERS   = ["Sana", "Foizlar", "Asosiy qarz", "Oylik to'lov", "Qoldiq"]
+    COL_W     = [90, 160, 160, 160, 160]
+    ROW_H     = 28
+    FONT_SIZE = 14
+    PAD       = 20
+
+    # Font
+    try:
+        font      = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", FONT_SIZE)
+        font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", FONT_SIZE)
+    except Exception:
+        font = font_bold = ImageFont.load_default()
+
+    # Body qatorlari
+    body = [HEADERS]
     for r in rows:
         body.append([r[0], *[fmt(x) for x in r[1:]]])
     jami_foiz  = sum(r[1] for r in rows[1:])
     jami_tolov = sum(r[3] for r in rows[1:])
     body.append(["Jami", fmt(jami_foiz), fmt(kredit_summa), fmt(jami_tolov), "-"])
 
-    row_count = len(body)
-    fig, ax   = plt.subplots(figsize=(10, 0.45 + row_count * 0.35))
-    ax.axis("off")
-    table = ax.table(cellText=body, loc="center", cellLoc="center")
-    table.auto_set_font_size(False)
-    table.set_fontsize(9 if row_count <= 26 else 7)
-    table.scale(1, 1.15)
+    n_rows = len(body)
+    n_cols = len(COL_W)
+    W = sum(COL_W) + PAD * 2
+    H = ROW_H * n_rows + PAD * 2 + 36  # 36 = title
 
-    for r in range(row_count):
-        for c in range(5):
-            cell = table[(r, c)]
-            if r == 0:
-                cell.set_facecolor("#cceeff")
-                cell.get_text().set_weight("bold")
-            elif r == row_count - 1:
-                cell.set_facecolor("#b3e6ff")
-                cell.get_text().set_weight("bold")
-            elif c == 3 and r not in (0, row_count - 1):
-                cell.set_facecolor("#e6e6e6")
-                cell.get_text().set_weight("bold")
-            elif r % 2 == 0:
-                cell.set_facecolor("#f9f9f9")
-            cell.set_edgecolor("black")
-            cell.set_linewidth(0.4)
+    img  = Image.new("RGB", (W, H), "white")
+    draw = ImageDraw.Draw(img)
 
-    plt.title(title, fontsize=13, weight="bold")
+    # Title
+    draw.text((PAD, PAD), title, fill="#003366", font=font_bold)
+    y0 = PAD + 36
+
+    COLORS = {
+        "header": "#cceeff",
+        "footer": "#b3e6ff",
+        "pay":    "#e6e6e6",
+        "even":   "#f9f9f9",
+        "white":  "#ffffff",
+    }
+
+    for ri, row in enumerate(body):
+        y = y0 + ri * ROW_H
+        x = PAD
+        for ci, (cell, cw) in enumerate(zip(row, COL_W)):
+            # Fon
+            if ri == 0:
+                bg = COLORS["header"]
+            elif ri == n_rows - 1:
+                bg = COLORS["footer"]
+            elif ci == 3:
+                bg = COLORS["pay"]
+            elif ri % 2 == 0:
+                bg = COLORS["even"]
+            else:
+                bg = COLORS["white"]
+
+            draw.rectangle([x, y, x + cw, y + ROW_H], fill=bg, outline="#999999")
+
+            # Matn
+            f = font_bold if ri in (0, n_rows - 1) or ci == 3 else font
+            tw = draw.textlength(str(cell), font=f)
+            tx = x + (cw - tw) / 2
+            ty = y + (ROW_H - FONT_SIZE) / 2
+            draw.text((tx, ty), str(cell), fill="#000000", font=f)
+            x += cw
+
     buf = io.BytesIO()
-    plt.savefig(buf, dpi=200, format="png", bbox_inches="tight")  # 200 dpi — tezroq
-    plt.close(fig)
+    img.save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf.getvalue()
 
 
 async def draw_png(rows: List[List], title: str, kredit_summa: float) -> BufferedInputFile:
-    """Async wrapper — event loop ni bloklamaydi. Lock bilan thread-safe."""
-    async with _plt_lock:
-        loop = asyncio.get_running_loop()
-        data = await loop.run_in_executor(None, partial(_draw_png_sync, rows, title, kredit_summa))
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(None, partial(_draw_png_sync, rows, title, kredit_summa))
     return BufferedInputFile(data, filename=f"{uuid.uuid4()}.png")
 
 
 # ── Natija chiqarish ──────────────────────────────────────────────
 
-async def _send_results(
-    msg: types.Message,
-    bot: Bot,
-    cfg: dict,
-    summa: float,
-    months: int,
-    rate: float,
-    grace_days: int,
-):
-    """Ikki jadval rasmini parallel generatsiya qilib yuboradi."""
+async def _send_results(msg, bot, cfg, summa, months, rate, grace_days):
     ann_rows  = ann_table(summa, rate, months, grace_days)
     diff_rows = diff_table(summa, rate, months, grace_days)
     label     = f"{cfg['name']} – {months} oy"
 
-    # Ketma-ket — matplotlib lock tufayli parallel foyda yo'q
+    # Ketma-ket — Pillow tez shuning uchun muammo yo'q
     ann_img  = await draw_png(ann_rows,  f"{label} | Annuitet",     summa)
     diff_img = await draw_png(diff_rows, f"{label} | Differensial", summa)
 
@@ -179,6 +197,7 @@ async def _send_results(
 
 @router.callback_query(F.data.in_(CFG.keys()))
 async def ask_year_or_sum(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     cfg = CFG[cb.data]
     await state.update_data(code=cb.data)
     if cb.data == "calc_auto":
@@ -246,12 +265,9 @@ async def ask_months(msg: types.Message, state: FSMContext):
 async def result(msg: types.Message, bot: Bot, state: FSMContext):
     data = await state.get_data()
     cfg  = CFG[data["code"]]
-
-    # Muddat avtomatik o'rnatilgan (hamkor) — raqam kutmaydi
     if "months" in data and cfg["mmin"] == cfg["mmax"]:
         await _finish(msg, bot, state)
         return
-
     oy_text = re.sub(r"\D", "", msg.text or "")
     if not oy_text:
         return await msg.answer("❗️Muddatni butun oyda kiriting.")
@@ -270,5 +286,8 @@ async def _finish(msg: types.Message, bot: Bot, state: FSMContext):
     rate       = data.get("rate", cfg["rate"])
     grace_days = cfg.get("grace_days", 0)
     await state.clear()
-    await msg.answer("⏳ Jadval tayyorlanmoqda...")
+    wait_msg = await msg.answer("⏳ Jadval tayyorlanmoqda...")
     await _send_results(msg, bot, cfg, summa, months, rate, grace_days)
+    import contextlib
+    with contextlib.suppress(Exception):
+        await wait_msg.delete()

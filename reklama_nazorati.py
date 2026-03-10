@@ -396,7 +396,7 @@ async def handle_media(message: Message):
         "✦ Tizim qayd etdi: reja oshib ketdi. Qo'shimcha faoliyat hisobga olindi.",
         "✦ Monitoring: rejadan ortiq natija. Siz bugun tizimda lider holatdasiz.",
         "✦ Nazorat tizimi: {count} ta screenshot — yuqori faollik. Oy reytingida hisoblanmoqda.",
-        "✦ Tizim: norm oshildi. Bunday xodimlar alohida e'tiborga olinadi.",
+        "✦ Tizim: kunlik norma oshib ketdi. Bunday xodimlar alohida e'tiborga olinadi.",
     ]
     import random
     if count == DAILY_TARGET:

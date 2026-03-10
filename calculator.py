@@ -1,7 +1,11 @@
 from __future__ import annotations
-import io, uuid, re, matplotlib.pyplot as plt
+import io, uuid, re, asyncio
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from typing import List
 from datetime import datetime
+from functools import partial
 
 from aiogram import Router, F, Bot, types
 from aiogram.enums import ParseMode
@@ -14,13 +18,11 @@ from aiogram.types import (
 
 router = Router()
 
-# FSM holatlari
 class CalcFSM(StatesGroup):
-    year = State()   # faqat "calc_auto" uchun
-    sum = State()
+    year  = State()
+    sum   = State()
     month = State()
 
-# Kredit konfiguratsiyasi
 CFG = {
     "calc_pension": {
         "name": "Pensiya krediti", "rate": 49,
@@ -41,7 +43,7 @@ CFG = {
     "calc_hamkor": {
         "name": "Hamkor krediti", "rate": 56,
         "min": 3_000_000, "max": 20_000_000, "mmin": 12, "mmax": 12,
-        "grace_days": 30  # Dastlabki 30 kun foizsiz
+        "grace_days": 30
     },
 }
 
@@ -51,81 +53,56 @@ BACK_KB = InlineKeyboardMarkup(
 
 fmt = lambda n: f"{round(n):,}".replace(",", " ")
 
-# === Annuitet jadvali (grace period bilan) ===
+
+# ── Jadvallar ─────────────────────────────────────────────────────
+
 def ann_table(pr: int, rate: float, m: int, grace_days: int = 0) -> List[List]:
-    """
-    Annuitet to'lov jadvali.
-    grace_days=30 bo'lsa, 1-oyda foiz 0 qilinadi, lekin asosiy qarz
-    oddiy annuitet formula bo'yicha hisoblangan qiymatda qoladi (Hamkor uchun).
-    """
-    r = rate / 12 / 100
-    
-    # Oddiy annuitet to'lov (barcha oylar uchun bir xil)
+    r   = rate / 12 / 100
     pay = pr * r / (1 - (1 + r) ** -m)
     bal = pr
     rows = [["Boshlanish", 0, 0, 0, pr]]
-    
     for i in range(1, m + 1):
-        # Oddiy annuitet formula bilan foiz va asosiy qarzni hisoblash
-        interest = bal * r
+        interest  = bal * r
         principal = pay - interest
-        
         if i == 1 and grace_days >= 30:
-            # 1-oy: foizni 0 qilamiz, asosiy qarz o'zgarmas
             actual_interest = 0
-            actual_payment = principal  # Faqat asosiy qarz to'lanadi
+            actual_payment  = principal
         else:
-            # 2-12 oy: oddiy to'lov
             actual_interest = interest
-            actual_payment = pay
-        
-        # Balans asosiy qarz bilan kamayadi (foiz 0 bo'lsa ham)
+            actual_payment  = pay
         bal -= principal
         rows.append([f"{i}-oy", actual_interest, principal, actual_payment, max(0, bal)])
-    
     return rows
 
-# === Differensial jadvali (grace period bilan) ===
+
 def diff_table(pr: int, rate: float, m: int, grace_days: int = 0) -> List[List]:
-    """
-    Differensial to'lov jadvali.
-    grace_days=30 bo'lsa, 1-oyda foiz hisoblanmaydi (Hamkor uchun).
-    """
-    r = rate / 12 / 100
-    principal = pr / m  # Har oyda bir xil asosiy qarz
-    bal = pr
+    r         = rate / 12 / 100
+    principal = pr / m
+    bal       = pr
     rows = [["Boshlanish", 0, 0, 0, pr]]
-    
     for i in range(1, m + 1):
-        if i == 1 and grace_days >= 30:
-            # 1-oy: foiz=0, faqat asosiy qarz
-            interest = 0
-        else:
-            # 2-12 oy: oddiy differensial formula
-            interest = bal * r
-        
-        total = principal + interest
-        bal -= principal
+        interest = 0 if (i == 1 and grace_days >= 30) else bal * r
+        total    = principal + interest
+        bal     -= principal
         rows.append([f"{i}-oy", interest, principal, total, max(0, bal)])
-    
     return rows
 
-# === Jadvalni rasmga chizish ===
-def draw_png(rows: List[List], title: str, kredit_summa: float) -> BufferedInputFile:
-    headers = ["Sana", "Foizlar", "Asosiy qarz", "Oylik to'lov", "Qoldiq summa"]
-    body = [headers]
 
+# ── PNG generatsiya — executor da ishlaydi ────────────────────────
+
+def _draw_png_sync(rows: List[List], title: str, kredit_summa: float) -> bytes:
+    """Sinxron — run_in_executor orqali chaqiriladi."""
+    headers = ["Sana", "Foizlar", "Asosiy qarz", "Oylik to'lov", "Qoldiq summa"]
+    body    = [headers]
     for r in rows:
         body.append([r[0], *[fmt(x) for x in r[1:]]])
-
-    jami_foiz = sum(r[1] for r in rows[1:])
+    jami_foiz  = sum(r[1] for r in rows[1:])
     jami_tolov = sum(r[3] for r in rows[1:])
     body.append(["Jami", fmt(jami_foiz), fmt(kredit_summa), fmt(jami_tolov), "-"])
 
     row_count = len(body)
-    fig, ax = plt.subplots(figsize=(10, 0.45 + row_count * 0.35))
+    fig, ax   = plt.subplots(figsize=(10, 0.45 + row_count * 0.35))
     ax.axis("off")
-
     table = ax.table(cellText=body, loc="center", cellLoc="center")
     table.auto_set_font_size(False)
     table.set_fontsize(9 if row_count <= 26 else 7)
@@ -143,30 +120,74 @@ def draw_png(rows: List[List], title: str, kredit_summa: float) -> BufferedInput
             elif c == 3 and r not in (0, row_count - 1):
                 cell.set_facecolor("#e6e6e6")
                 cell.get_text().set_weight("bold")
-            elif r % 2 == 0 and r not in (0, row_count - 1):
+            elif r % 2 == 0:
                 cell.set_facecolor("#f9f9f9")
             cell.set_edgecolor("black")
             cell.set_linewidth(0.4)
 
     plt.title(title, fontsize=13, weight="bold")
     buf = io.BytesIO()
-    plt.savefig(buf, dpi=300, format="png", bbox_inches="tight")
-    plt.close()
+    plt.savefig(buf, dpi=200, format="png", bbox_inches="tight")  # 200 dpi — tezroq
+    plt.close(fig)
     buf.seek(0)
-    return BufferedInputFile(buf.getvalue(), filename=f"{uuid.uuid4()}.png")
+    return buf.getvalue()
 
-# === Kredit turi tanlandi ===
+
+async def draw_png(rows: List[List], title: str, kredit_summa: float) -> BufferedInputFile:
+    """Async wrapper — event loop ni bloklamaydi."""
+    loop  = asyncio.get_running_loop()
+    data  = await loop.run_in_executor(None, partial(_draw_png_sync, rows, title, kredit_summa))
+    return BufferedInputFile(data, filename=f"{uuid.uuid4()}.png")
+
+
+# ── Natija chiqarish ──────────────────────────────────────────────
+
+async def _send_results(
+    msg: types.Message,
+    bot: Bot,
+    cfg: dict,
+    summa: float,
+    months: int,
+    rate: float,
+    grace_days: int,
+):
+    """Ikki jadval rasmini parallel generatsiya qilib yuboradi."""
+    ann_rows  = ann_table(summa, rate, months, grace_days)
+    diff_rows = diff_table(summa, rate, months, grace_days)
+    label     = f"{cfg['name']} – {months} oy"
+
+    # Parallel generatsiya — ikkalasi bir vaqtda hisoblanadi
+    ann_img, diff_img = await asyncio.gather(
+        draw_png(ann_rows,  f"{label} | Annuitet",      summa),
+        draw_png(diff_rows, f"{label} | Differensial",  summa),
+    )
+
+    await bot.send_photo(
+        msg.chat.id, ann_img,
+        caption="📄 <b>Annuitet jadval\n@Gallaorol_FBbot</b>",
+        parse_mode=ParseMode.HTML,
+    )
+    await bot.send_photo(
+        msg.chat.id, diff_img,
+        caption="📄 <b>Differensial jadval\n@Gallaorol_FBbot</b>",
+        parse_mode=ParseMode.HTML,
+    )
+    await msg.answer("✅ Hisob-kitob tayyor!", reply_markup=BACK_KB)
+
+
+# ── Handlerlar ────────────────────────────────────────────────────
+
 @router.callback_query(F.data.in_(CFG.keys()))
 async def ask_year_or_sum(cb: CallbackQuery, state: FSMContext):
     cfg = CFG[cb.data]
     await state.update_data(code=cb.data)
-
     if cb.data == "calc_auto":
         await cb.message.answer(
-            "🚘 So'nggi 5 yilda ishlab chiqarilgan avtomashinalar uchun hozirgi foiz stavkadan 6% chegirma mavjud.\n\n"
+            "🚘 So'nggi 5 yilda ishlab chiqarilgan avtomashinalar uchun "
+            "hozirgi foiz stavkadan 6% chegirma mavjud.\n\n"
             "<b>Avtomobil ishlab chiqarilgan yilini kiriting:👇</b>",
             parse_mode=ParseMode.HTML,
-            reply_markup=BACK_KB
+            reply_markup=BACK_KB,
         )
         await state.set_state(CalcFSM.year)
     else:
@@ -178,128 +199,76 @@ async def ask_year_or_sum(cb: CallbackQuery, state: FSMContext):
         )
         await state.set_state(CalcFSM.sum)
 
-# === Avto yil kiritildi ===
+
 @router.message(CalcFSM.year)
 async def ask_sum_after_year(msg: types.Message, state: FSMContext):
-    yil_text = re.sub(r"\D", "", msg.text)
+    yil_text = re.sub(r"\D", "", msg.text or "")
     if not yil_text:
         return await msg.answer("❗️Yilni raqam bilan kiriting (masalan, 2022).")
-
     yil = int(yil_text)
     hozirgi_yil = datetime.now().year
-
     if yil < 2000 or yil > hozirgi_yil:
         return await msg.answer(f"❗️Yil 2000 va {hozirgi_yil} oralig'ida bo'lishi kerak.")
-
-    farq = hozirgi_yil - yil
-    await state.update_data(rate = 48 if farq <= 5 else CFG["calc_auto"]["rate"])
-
+    await state.update_data(rate=48 if (hozirgi_yil - yil) <= 5 else CFG["calc_auto"]["rate"])
     data = await state.get_data()
-    cfg = CFG[data["code"]]
+    cfg  = CFG[data["code"]]
     await msg.answer(
         f"Kredit summasini kiriting:\n({fmt(cfg['min'])} – {fmt(cfg['max'])}) so'm",
         reply_markup=BACK_KB,
     )
     await state.set_state(CalcFSM.sum)
 
-# === Summani olish ===
+
 @router.message(CalcFSM.sum)
 async def ask_months(msg: types.Message, state: FSMContext):
     data = await state.get_data()
-    cfg = CFG[data["code"]]
-
-    summa_text = re.sub(r"\D", "", msg.text)
+    cfg  = CFG[data["code"]]
+    summa_text = re.sub(r"\D", "", msg.text or "")
     if not summa_text:
         return await msg.answer("❗️Faqat raqam kiriting.")
-
     summa = float(summa_text)
     if not cfg["min"] <= summa <= cfg["max"]:
         return await msg.answer(f"❗️{fmt(cfg['min'])} – {fmt(cfg['max'])} oralig'ida.")
-
     await state.update_data(summa=summa)
-    
-    # Agar muddat faqat bitta qiymat bo'lsa (mmin == mmax), avtomatik o'rnatamiz
     if cfg["mmin"] == cfg["mmax"]:
         await state.update_data(months=cfg["mmin"])
-        # To'g'ridan-to'g'ri natija chiqarish
-        await result_direct(msg, state)
+        await state.set_state(CalcFSM.month)
+        await _finish(msg, msg.bot, state)
     else:
         await state.set_state(CalcFSM.month)
         await msg.answer(
             f"📆 Muddatni kiriting ({cfg['mmin']} – {cfg['mmax']}) oy:",
-            reply_markup=BACK_KB
+            reply_markup=BACK_KB,
         )
 
-# === To'g'ridan-to'g'ri natija (muddat avtomatik) ===
-async def result_direct(msg: types.Message, state: FSMContext):
-    """calc_hamkor kabi faqat bitta muddat bo'lganda ishlatiladi"""
-    data = await state.get_data()
-    cfg = CFG[data["code"]]
-    
-    months = data["months"]
-    summa = data["summa"]
-    rate = data.get("rate", cfg["rate"])
-    grace_days = cfg.get("grace_days", 0)
 
-    # Jadvallarni yaratish
-    ann_rows = ann_table(summa, rate, months, grace_days)
-    diff_rows = diff_table(summa, rate, months, grace_days)
-    
-    ann_png = draw_png(ann_rows, f"{cfg['name']} – {months} oy | Annuitet", summa)
-    diff_png = draw_png(diff_rows, f"{cfg['name']} – {months} oy | Differensial", summa)
-
-    # Rasmlarni yuborish
-    bot = msg.bot
-    await bot.send_photo(
-        msg.chat.id, ann_png,
-        caption="📄 <b>Annuitet jadval\n@Gallaorol_FBbot</b>",
-        parse_mode=ParseMode.HTML
-    )
-    await bot.send_photo(
-        msg.chat.id, diff_png,
-        caption="📄 <b>Differensial jadval\n@Gallaorol_FBbot</b>",
-        parse_mode=ParseMode.HTML
-    )
-    
-    await msg.answer("✅ Hisob-kitob tayyor!", reply_markup=BACK_KB)
-    await state.clear()
-
-# === Muddat kiritildi – natija ===
 @router.message(CalcFSM.month)
 async def result(msg: types.Message, bot: Bot, state: FSMContext):
-    oy_text = re.sub(r"\D", "", msg.text)
+    data = await state.get_data()
+    cfg  = CFG[data["code"]]
+
+    # Muddat avtomatik o'rnatilgan (hamkor) — raqam kutmaydi
+    if "months" in data and cfg["mmin"] == cfg["mmax"]:
+        await _finish(msg, bot, state)
+        return
+
+    oy_text = re.sub(r"\D", "", msg.text or "")
     if not oy_text:
         return await msg.answer("❗️Muddatni butun oyda kiriting.")
-
     months = int(oy_text)
-    data = await state.get_data()
-    cfg = CFG[data["code"]]
-
     if not cfg["mmin"] <= months <= cfg["mmax"]:
         return await msg.answer(f"❗️{cfg['mmin']} – {cfg['mmax']} oy oralig'ida.")
+    await state.update_data(months=months)
+    await _finish(msg, bot, state)
 
-    summa = data["summa"]
-    rate = data.get("rate", cfg["rate"])
+
+async def _finish(msg: types.Message, bot: Bot, state: FSMContext):
+    data       = await state.get_data()
+    cfg        = CFG[data["code"]]
+    summa      = data["summa"]
+    months     = data["months"]
+    rate       = data.get("rate", cfg["rate"])
     grace_days = cfg.get("grace_days", 0)
-
-    # Jadvallarni yaratish
-    ann_rows = ann_table(summa, rate, months, grace_days)
-    diff_rows = diff_table(summa, rate, months, grace_days)
-    
-    ann_png = draw_png(ann_rows, f"{cfg['name']} – {months} oy | Annuitet", summa)
-    diff_png = draw_png(diff_rows, f"{cfg['name']} – {months} oy | Differensial", summa)
-
-    # Rasmlarni yuborish
-    await bot.send_photo(
-        msg.chat.id, ann_png,
-        caption="📄 <b>Annuitet jadval\n@Gallaorol_FBbot</b>",
-        parse_mode=ParseMode.HTML
-    )
-    await bot.send_photo(
-        msg.chat.id, diff_png,
-        caption="📄 <b>Differensial jadval\n@Gallaorol_FBbot</b>",
-        parse_mode=ParseMode.HTML
-    )
-    
-    await msg.answer("✅ Hisob-kitob tayyor!", reply_markup=BACK_KB)
     await state.clear()
+    await msg.answer("⏳ Jadval tayyorlanmoqda...")
+    await _send_results(msg, bot, cfg, summa, months, rate, grace_days)

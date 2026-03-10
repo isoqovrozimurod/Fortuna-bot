@@ -121,33 +121,24 @@ def _get_date_col(ws: gspread.Worksheet, date_str: str) -> int:
     return new_col
 
 
-def _cleanup_duplicate_cols_sync() -> int:
-    """
-    Bir xil sana ustunlari bo'lsa ikkinchisini o'chiradi.
-    Sheets da N va O da bir xil sana bo'lsa — O ustunidagi
-    qiymatlarni N ga qo'shib, O ni o'chiradi.
-    """
-    sheet   = _ws()
+def _cleanup_duplicate_cols_sync_inner(sheet: gspread.Worksheet) -> int:
+    """Sheet object bilan dublikat ustunlarni tozalaydi."""
     headers = sheet.row_values(1)
     seen    = {}
     removed = 0
-    # O'ngdan chapga — dublikatlarni topamiz
     for i, h in enumerate(headers):
         h = str(h).strip()
         if not h:
             continue
         if h in seen:
-            # Dublikat topildi — merge qilamiz
-            first_col = seen[h]   # 1-based
-            dupe_col  = i + 1     # 1-based
-            last_row  = sheet.lastrow if hasattr(sheet, "lastrow") else sheet.row_count
+            first_col = seen[h]
+            dupe_col  = i + 1
             all_vals  = sheet.get_all_values()
             for row_i, row in enumerate(all_vals[1:], start=2):
                 first_val = int(row[first_col-1]) if len(row) >= first_col and str(row[first_col-1]).strip().isdigit() else 0
                 dupe_val  = int(row[dupe_col-1])  if len(row) >= dupe_col  and str(row[dupe_col-1]).strip().isdigit()  else 0
                 if dupe_val > 0:
                     sheet.update_cell(row_i, first_col, first_val + dupe_val)
-            # Dublikat ustunni bo'shamiz (sarlavhasini ham)
             last_row_idx = len(all_vals)
             if last_row_idx > 0:
                 sheet.batch_clear([f"{_col_letter(dupe_col)}1:{_col_letter(dupe_col)}{last_row_idx}"])
@@ -155,6 +146,15 @@ def _cleanup_duplicate_cols_sync() -> int:
         else:
             seen[h] = i + 1
     return removed
+
+
+def _cleanup_duplicate_cols_sync() -> int:
+    """
+    Bir xil sana ustunlari bo'lsa ikkinchisini o'chiradi.
+    """
+    sheet   = _ws()
+    headers = sheet.row_values(1)
+    return _cleanup_duplicate_cols_sync_inner(sheet)
 
 def _col_letter(n: int) -> str:
     s = ""
@@ -199,6 +199,13 @@ def _safe_records(ws: gspread.Worksheet) -> list[dict]:
 _local_counts: dict[int, dict] = {}
 # Bugungi yuborilgan file_unique_id lar — dublikatni aniqlash uchun
 _seen_files: dict[int, set] = {}
+# Per-user lock — bir vaqtda bir nechta screenshot kelganda race condition ni oldini olish
+_user_locks: dict[int, asyncio.Lock] = {}
+
+def _get_user_lock(user_id: int) -> asyncio.Lock:
+    if user_id not in _user_locks:
+        _user_locks[user_id] = asyncio.Lock()
+    return _user_locks[user_id]
 
 def _local_get(user_id: int) -> int:
     data = _local_counts.get(user_id)
@@ -242,11 +249,12 @@ def _read_sheet_count_sync(user_id: int) -> int:
 def _increment_sheet_sync(user_id: int) -> int:
     """
     Sheets dan hozirgi qiymatni o'qiydi, +1 qo'shib yozadi.
-    Atomik emas lekin bot single-process bo'lgani uchun yetarli.
+    Har safar dublikat ustunlarni ham tozalaydi.
     Yangi qiymatni qaytaradi.
     """
     try:
-        sheet    = _ws()
+        sheet = _ws()
+        _cleanup_duplicate_cols_sync_inner(sheet)
         date_col = _get_date_col(sheet, today_str())
         row      = _find_row(sheet, user_id)
         if not row:
@@ -360,20 +368,19 @@ async def handle_media(message: Message):
 
     _mark_seen(u.id, file_uid)
 
-    # ── Hisoblash ────────────────────────────────────────────────
-    cached = _local_get(u.id)   # -1 = keshda yoq (bot restart bolgan)
-    loop   = asyncio.get_running_loop()
-
-    if cached >= 0:
-        count = cached + 1
-        _local_set(u.id, count)
-        asyncio.ensure_future(
-            loop.run_in_executor(None, _increment_sheet_sync, u.id)
-        )
-    else:
-        # Keshda yoq — Sheets dan hozirgi qiymatni oqib +1 qoshamiz
-        count = await loop.run_in_executor(None, _increment_sheet_sync, u.id)
-        _local_set(u.id, count)
+    # ── Hisoblash (per-user lock — race condition yo'q) ──────────
+    loop = asyncio.get_running_loop()
+    async with _get_user_lock(u.id):
+        cached = _local_get(u.id)
+        if cached >= 0:
+            count = cached + 1
+            _local_set(u.id, count)
+            # Sheets ga yozish — await bilan, serialized
+            await loop.run_in_executor(None, _increment_sheet_sync, u.id)
+        else:
+            # Keshda yoq — Sheets dan o'qib +1
+            count = await loop.run_in_executor(None, _increment_sheet_sync, u.id)
+            _local_set(u.id, count)
 
     # ── Javob ────────────────────────────────────────────────────
     bar   = progress_bar(count, DAILY_TARGET)

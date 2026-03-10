@@ -604,6 +604,9 @@ async def cb_stat(call: CallbackQuery):
         return
     if call.data == "stat_rating":
         await call.answer("⏳ Reyting hisoblanmoqda...")
+        loop = asyncio.get_running_loop()
+        with contextlib.suppress(Exception):
+            await loop.run_in_executor(None, _cleanup_duplicate_cols_sync)
         try:
             text = await _build_rating_text(30)
             await call.message.edit_text(text, reply_markup=_stat_kb(), parse_mode="HTML")
@@ -613,6 +616,10 @@ async def cb_stat(call: CallbackQuery):
         return
 
     await call.answer("⏳ Hisoblanmoqda...")
+    # Dublikat ustunlarni tozalaymiz
+    loop = asyncio.get_running_loop()
+    with contextlib.suppress(Exception):
+        await loop.run_in_executor(None, _cleanup_duplicate_cols_sync)
     days_map = {
         "stat_daily":   (1,  "Kunlik"),
         "stat_weekly":  (7,  "Haftalik"),

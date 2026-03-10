@@ -17,6 +17,7 @@ from aiogram.types import (
 )
 
 router = Router()
+_plt_lock = asyncio.Lock()  # matplotlib thread-safe emas
 
 class CalcFSM(StatesGroup):
     year  = State()
@@ -134,9 +135,10 @@ def _draw_png_sync(rows: List[List], title: str, kredit_summa: float) -> bytes:
 
 
 async def draw_png(rows: List[List], title: str, kredit_summa: float) -> BufferedInputFile:
-    """Async wrapper — event loop ni bloklamaydi."""
-    loop  = asyncio.get_running_loop()
-    data  = await loop.run_in_executor(None, partial(_draw_png_sync, rows, title, kredit_summa))
+    """Async wrapper — event loop ni bloklamaydi. Lock bilan thread-safe."""
+    async with _plt_lock:
+        loop = asyncio.get_running_loop()
+        data = await loop.run_in_executor(None, partial(_draw_png_sync, rows, title, kredit_summa))
     return BufferedInputFile(data, filename=f"{uuid.uuid4()}.png")
 
 
@@ -156,11 +158,9 @@ async def _send_results(
     diff_rows = diff_table(summa, rate, months, grace_days)
     label     = f"{cfg['name']} – {months} oy"
 
-    # Parallel generatsiya — ikkalasi bir vaqtda hisoblanadi
-    ann_img, diff_img = await asyncio.gather(
-        draw_png(ann_rows,  f"{label} | Annuitet",      summa),
-        draw_png(diff_rows, f"{label} | Differensial",  summa),
-    )
+    # Ketma-ket — matplotlib lock tufayli parallel foyda yo'q
+    ann_img  = await draw_png(ann_rows,  f"{label} | Annuitet",     summa)
+    diff_img = await draw_png(diff_rows, f"{label} | Differensial", summa)
 
     await bot.send_photo(
         msg.chat.id, ann_img,

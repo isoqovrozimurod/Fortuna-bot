@@ -253,8 +253,7 @@ def _increment_sheet_sync(user_id: int) -> int:
     Yangi qiymatni qaytaradi.
     """
     try:
-        sheet = _ws()
-        _cleanup_duplicate_cols_sync_inner(sheet)
+        sheet    = _ws()
         date_col = _get_date_col(sheet, today_str())
         row      = _find_row(sheet, user_id)
         if not row:

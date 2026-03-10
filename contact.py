@@ -10,8 +10,8 @@ from aiogram.types import (
 router = Router()
 
 # Lokatsiya koordinatalari (aniq manzil uchun)
-LATITUDE = 40.024357
-LONGITUDE = 67.589176
+LATITUDE = 40.024361
+LONGITUDE = 67.589167
 
 # Kontakt matni
 CONTACT_TEXT = (

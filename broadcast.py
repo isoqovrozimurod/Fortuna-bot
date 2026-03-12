@@ -28,14 +28,12 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Race condition oldini olish
 _registering: set[int] = set()
 _register_lock = asyncio.Lock()
 router = Router()
 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
-# ===================== SHEETS CONFIG =====================
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
@@ -73,21 +71,12 @@ def get_users_sheet() -> gspread.Worksheet:
 # ===================== USER OPERATSIYALARI =====================
 
 def _cleanup_sheet_sync() -> None:
-    """
-    Varaqni tozalaydi va T/r ni tartiblab qayta yozadi:
-    1. Telegram ID bo'sh qatorlarni o'chiradi
-    2. T/r ni 1 dan boshlab ketma-ket tartibda qayta yozadi
-    """
     ws = get_users_sheet()
     all_rows = ws.get_all_values()
     if len(all_rows) <= 1:
-        return  # Faqat sarlavha bor
+        return
 
-    header = all_rows[0]
     data_rows = all_rows[1:]
-
-    # Telegram ID bo'sh bo'lmagan qatorlarni olamiz
-    # Dublikatlarni ham o'chiramiz — bir xil ID dan faqat birinchisi qoladi
     seen_ids: set[str] = set()
     valid_rows = []
     for row in data_rows:
@@ -99,27 +88,18 @@ def _cleanup_sheet_sync() -> None:
     if not valid_rows:
         return
 
-    # T/r tartiblaymiz, Holati bo'sh bo'lsa "Faol" qilamiz
     for i, row in enumerate(valid_rows, start=1):
         while len(row) < 8:
             row.append("")
-        row[0] = str(i)                              # T/r
-        if not str(row[7]).strip():                  # Holati bo'sh bo'lsa
+        row[0] = str(i)
+        if not str(row[7]).strip():
             row[7] = "Faol"
 
-    # Butun varaqni qayta yozamiz
     total_existing = len(all_rows)
     total_valid = len(valid_rows)
 
-    # 1. Mavjud ma'lumot qatorlarini yangilaymiz
-    if valid_rows:
-        ws.update(
-            f"A2:H{total_valid + 1}",
-            valid_rows,
-            value_input_option="RAW"
-        )
+    ws.update(f"A2:H{total_valid + 1}", valid_rows, value_input_option="RAW")
 
-    # 2. Ortiqcha qatorlarni tozalaymiz (bo'sh qilish)
     if total_existing > total_valid + 1:
         empty_rows = [[""] * 8 for _ in range(total_existing - total_valid - 1)]
         ws.update(
@@ -130,7 +110,6 @@ def _cleanup_sheet_sync() -> None:
 
 
 def _find_user_row_sync(user_id: int) -> int | None:
-    """Foydalanuvchi qatorini topadi (1-based), yo'q bo'lsa None"""
     ws = get_users_sheet()
     telegram_ids = ws.col_values(2)
     for i, val in enumerate(telegram_ids, start=1):
@@ -163,28 +142,19 @@ def _save_user_sync(
     row_idx = _find_user_row_sync(user_id)
 
     if row_idx is not None:
-        # Mavjud foydalanuvchi — username/ism/familiya yangilaymiz
-        # Telegram ID hech qachon o'zgarmaydi
         ws.update_cell(row_idx, 3, uname)
         ws.update_cell(row_idx, 4, first_name)
         ws.update_cell(row_idx, 5, last_name)
         if phone:
             ws.update_cell(row_idx, 6, phone)
     else:
-        # Yangi foydalanuvchi:
-        # 1. Avval tozalaymiz (bo'sh qatorlar o'chadi, T/r tartiblanadi)
-        # 2. Keyin T/r ni aniqlaymiz
-        # 3. Oxiriga qo'shamiz
         _cleanup_sheet_sync()
-
-        # Tozalanganidan keyin hozirgi faol qatorlar sonini olamiz
         all_vals = ws.get_all_values()
         valid_count = sum(
             1 for r in all_vals[1:]
             if len(r) > 1 and str(r[1]).strip()
         )
         tr = valid_count + 1
-
         new_row = [
             str(tr),
             str(user_id),
@@ -198,8 +168,17 @@ def _save_user_sync(
         ws.append_row(new_row, value_input_option="RAW")
 
 
+def _update_user_status_sync(user_id: int, status: str) -> None:
+    """user varaqida foydalanuvchi Holati ustunini yangilaydi"""
+    ws = get_users_sheet()
+    telegram_ids = ws.col_values(2)
+    for i, val in enumerate(telegram_ids, start=1):
+        if str(val).strip() == str(user_id):
+            ws.update_cell(i, 8, status)
+            return
+
+
 def _cleanup_any_sheet(sheet_name: str) -> None:
-    """Istalgan varaqni tozalaydi: bo'sh qatorlar, dublikatlar, T/r, Holati"""
     gc = get_sheets_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet(sheet_name)
@@ -244,27 +223,18 @@ def _cleanup_any_sheet(sheet_name: str) -> None:
 
 
 async def cleanup_sheet() -> None:
-    """user va Sub-adminlar varaqlarini tozalaydi:
-    - Bo'sh qatorlar o'chiriladi
-    - Dublikatlar (bir xil Telegram ID) o'chiriladi
-    - T/r 1 dan tartiblab qayta yoziladi
-    """
     loop = asyncio.get_event_loop()
-
-    # 1. user varag'ini tozalaymiz
     try:
         await loop.run_in_executor(None, _cleanup_sheet_sync)
     except Exception as e:
         logger.error(f"user varag'ini tozalashda xato: {e}")
 
-    # 2. Sub-adminlar varag'ini tozalaymiz
     try:
         await loop.run_in_executor(None, _cleanup_any_sheet, "sub_adminlar")
     except Exception as e:
         import traceback
         logger.error(f"Sub-adminlar varag'ini tozalashda xato: {e}")
         logger.error(traceback.format_exc())
-        # Mavjud varaq nomlarini ko'rsatamiz
         try:
             def _list_sheets():
                 gc = get_sheets_client()
@@ -282,10 +252,9 @@ async def save_user(
     username: str = "",
     phone: str = "",
 ) -> None:
-    """Bir vaqtda bir xil user uchun faqat bitta yozuv — lock bilan"""
     async with _register_lock:
         if user_id in _registering:
-            return  # Hozir yozilmoqda
+            return
         _registering.add(user_id)
     try:
         parts = (full_name or "").split(" ", 1)
@@ -322,7 +291,7 @@ async def get_all_users() -> list[int]:
 
 def _get_all_users_sync() -> list[int]:
     ws = get_users_sheet()
-    values = ws.col_values(2)[1:]  # 2-ustun: Telegram ID, 1-qator sarlavha
+    values = ws.col_values(2)[1:]
     result = []
     for v in values:
         try:
@@ -380,15 +349,14 @@ def collecting_kb() -> InlineKeyboardMarkup:
 
 @router.message(Command("cleanup_users"))
 async def cmd_cleanup_users(message: Message, state: FSMContext):
-    """Foydalanuvchilar varag'ini tozalaydi va T/r ni tartiblab qayta yozadi"""
     if message.from_user.id != ADMIN_ID:
         return
     msg = await message.answer("⏳ Tozalanmoqda...")
     await cleanup_sheet()
     await msg.edit_text(
         "✅ <b>Tozalash yakunlandi!</b>\n\n"
-        "• Bosh qatorlar ochirildi\n"
-        "• Dublikatlar ochirildi\n"
+        "• Bo'sh qatorlar o'chirildi\n"
+        "• Dublikatlar o'chirildi\n"
         "• T/r tartiblab qayta yozildi\n\n"
         "user va Sub-adminlar varaqlari tozalandi.",
         parse_mode="HTML"
@@ -407,7 +375,7 @@ async def cmd_broadcast(message: Message, state: FSMContext):
     count = await get_user_count()
     await message.answer(
         f"📢 <b>Ommaviy xabar yuborish</b>\n\n"
-        f"👥 Foydalanuvchilar soni: <b>{count}</b>\n\n"
+        f"👥 Faol foydalanuvchilar: <b>{count}</b>\n\n"
         f"Quyidagilarni yuboring (barchasini ketma-ket):\n"
         f"• Matn\n"
         f"• Rasm (caption bilan yoki alohida)\n"
@@ -479,7 +447,7 @@ async def preview_broadcast(call: CallbackQuery, state: FSMContext, bot: Bot):
 
     count = await get_user_count()
     await call.message.answer(
-        f"📢 Yuqoridagi kontent <b>{count}</b> ta foydalanuvchiga yuboriladi.\n\n"
+        f"📢 Yuqoridagi kontent <b>{count}</b> ta faol foydalanuvchiga yuboriladi.\n\n"
         f"Tasdiqlaysizmi?",
         reply_markup=confirm_kb(),
         parse_mode="HTML",
@@ -508,12 +476,29 @@ async def send_broadcast(call: CallbackQuery, state: FSMContext, bot: Bot):
 
     success = 0
     failed = 0
+    loop = asyncio.get_event_loop()
 
     for i, user_id in enumerate(users, 1):
         try:
             await _send_items(bot, user_id, items)
             success += 1
-        except (TelegramForbiddenError, TelegramBadRequest):
+            # Yuborildi — avval bloklangan bo'lsa Faol ga qaytaramiz
+            try:
+                await loop.run_in_executor(
+                    None, _update_user_status_sync, user_id, "Faol"
+                )
+            except Exception:
+                pass
+        except TelegramForbiddenError:
+            # Bot hali ham bloklangan — Bloklagan holatda qoldirамiz
+            failed += 1
+            try:
+                await loop.run_in_executor(
+                    None, _update_user_status_sync, user_id, "Bloklagan"
+                )
+            except Exception as e:
+                logger.warning(f"Status yangilashda xato ({user_id}): {e}")
+        except TelegramBadRequest:
             failed += 1
         except Exception as e:
             logger.warning(f"Yuborishda xato ({user_id}): {e}")

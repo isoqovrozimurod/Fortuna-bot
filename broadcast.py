@@ -460,6 +460,24 @@ async def add_more(call: CallbackQuery):
     await call.answer("Yana kontent yuboring 👇")
 
 
+def _batch_update_statuses_sync(changes: dict[int, str]) -> None:
+    """
+    changes = {user_id: "Faol" | "Bloklagan"}
+    Barcha o'zgarishlarni bir tekshirishda yozadi.
+    """
+    if not changes:
+        return
+    ws = get_users_sheet()
+    telegram_ids = ws.col_values(2)
+    for i, val in enumerate(telegram_ids, start=1):
+        try:
+            uid = int(str(val).strip())
+        except (ValueError, TypeError):
+            continue
+        if uid in changes:
+            ws.update_cell(i, 8, changes[uid])
+
+
 @router.callback_query(BroadcastFSM.confirming, F.data == "bc_send")
 async def send_broadcast(call: CallbackQuery, state: FSMContext, bot: Bot):
     data = await state.get_data()
@@ -476,28 +494,17 @@ async def send_broadcast(call: CallbackQuery, state: FSMContext, bot: Bot):
 
     success = 0
     failed = 0
-    loop = asyncio.get_event_loop()
+    # Status o'zgarishlari: {user_id: "Faol" | "Bloklagan"}
+    status_changes: dict[int, str] = {}
 
     for i, user_id in enumerate(users, 1):
         try:
             await _send_items(bot, user_id, items)
             success += 1
-            # Yuborildi — avval bloklangan bo'lsa Faol ga qaytaramiz
-            try:
-                await loop.run_in_executor(
-                    None, _update_user_status_sync, user_id, "Faol"
-                )
-            except Exception:
-                pass
+            status_changes[user_id] = "Faol"
         except TelegramForbiddenError:
-            # Bot hali ham bloklangan — Bloklagan holatda qoldirамiz
             failed += 1
-            try:
-                await loop.run_in_executor(
-                    None, _update_user_status_sync, user_id, "Bloklagan"
-                )
-            except Exception as e:
-                logger.warning(f"Status yangilashda xato ({user_id}): {e}")
+            status_changes[user_id] = "Bloklagan"
         except TelegramBadRequest:
             failed += 1
         except Exception as e:
@@ -511,6 +518,16 @@ async def send_broadcast(call: CallbackQuery, state: FSMContext, bot: Bot):
                 pass
 
         await asyncio.sleep(0.05)
+
+    # Barcha o'zgarishlarni bir marta yozamiz
+    if status_changes:
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, _batch_update_statuses_sync, status_changes
+            )
+        except Exception as e:
+            logger.error(f"Batch status yangilashda xato: {e}")
 
     await status_msg.edit_text(
         f"✅ <b>Yuborildi!</b>\n\n"

@@ -201,6 +201,8 @@ _local_counts: dict[int, dict] = {}
 _seen_files: dict[int, set] = {}
 # Per-user lock — bir vaqtda bir nechta screenshot kelganda race condition ni oldini olish
 _user_locks: dict[int, asyncio.Lock] = {}
+# Har bir user uchun oxirgi bot reply message_id — yangi kelganda o'chiramiz
+_last_reply_msgs: dict[int, int] = {}
 
 def _get_user_lock(user_id: int) -> asyncio.Lock:
     if user_id not in _user_locks:
@@ -428,8 +430,15 @@ async def handle_media(message: Message):
             f"\n🤖 <i>{roast}</i>"
             f"\n📌 {CHANNEL_LINK}"
         )
+    # Avvalgi bot javobini o'chiramiz
+    if u.id in _last_reply_msgs:
+        with contextlib.suppress(Exception):
+            await message.bot.delete_message(GROUP_ID, _last_reply_msgs[u.id])
+        del _last_reply_msgs[u.id]
+
     with contextlib.suppress(Exception):
-        await message.reply(text, parse_mode="HTML", disable_web_page_preview=True)
+        sent = await message.reply(text, parse_mode="HTML", disable_web_page_preview=True)
+        _last_reply_msgs[u.id] = sent.message_id
 
 @router.message(F.chat.func(lambda c: c.id == GROUP_ID and GROUP_ID != 0), ~F.photo, ~F.document)
 async def handle_text(message: Message):
@@ -844,6 +853,62 @@ async def check_screenshots(bot: Bot) -> None:
                 f"✅ {done_cnt}  ❌ {len(debtors)} / {total}",
                 parse_mode="HTML",
             )
+
+
+async def check_midday(bot: Bot) -> None:
+    """12:00 — faqat hali screenshot tashlamaganlar uchun ogohlantirish."""
+    if GROUP_ID == 0:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+        data = await loop.run_in_executor(None, lambda: _safe_records(_ws()))
+    except Exception as e:
+        logger.error(f"check_midday Sheets xato: {e}")
+        return
+
+    today    = today_str()
+    debtors  = []
+
+    for r in data:
+        if str(r.get("Holati", "")).strip() == "Chiqib ketdi":
+            continue
+        tg_id = str(r.get("Telegram ID", "")).strip()
+        if not tg_id:
+            continue
+        cnt_raw = r.get(today, 0)
+        cnt     = int(cnt_raw) if str(cnt_raw).strip().isdigit() else 0
+        try:
+            local = _local_get(int(tg_id))
+        except ValueError:
+            local = 0
+        cnt = max(cnt, local)
+        if cnt < DAILY_TARGET:
+            name = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
+            debtors.append({"id": tg_id, "name": name, "count": cnt})
+
+    if not debtors:
+        return
+
+    lines = [
+        "⏰ <b>12:00 — Tushlik nazorati</b>",
+        f"📅 {today}\n",
+        f"❌ Hali taslimot qilmaganlar: <b>{len(debtors)}</b> ta\n",
+    ]
+    for i, u in enumerate(debtors, 1):
+        bar  = progress_bar(u["count"], DAILY_TARGET)
+        note = f"{u['count']}/{DAILY_TARGET}" if u["count"] > 0 else "hali boshlmadi"
+        lines.append(
+            f"{i}. {_mention(u['id'], u['name'])}\n"
+            f"   {bar} {note}"
+        )
+    lines += [
+        "\n➖➖➖➖➖➖➖➖➖➖",
+        "⚡ <b>Tizim ogohlantiradi: kunning yarmi o'tdi!</b>",
+        f"📌 {CHANNEL_LINK}",
+    ]
+
+    with contextlib.suppress(TelegramForbiddenError):
+        await _send_long(bot, GROUP_ID, "\n".join(lines))
 
 
 # ===================== ADMIN BUYRUQLARI =====================

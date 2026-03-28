@@ -1,5 +1,4 @@
-"""
-Bot buyruqlari sozlamalari
+"""Bot buyruqlari sozlamalari
 - Oddiy foydalanuvchilar uchun
 - Admin uchun
 - Reklama guruhi uchun

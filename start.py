@@ -9,6 +9,8 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
     ReplyKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardRemove,
@@ -22,11 +24,6 @@ router = Router()
 TEMP_DIR = Path(__file__).resolve().parent / "temp"
 PROMO_IMAGE = TEMP_DIR / "fortuna.jpg"
 
-# Tugma matnlari — boshqa fayllarda ham shu konstantalardan foydalaning
-BTN_CREDIT   = "📊 Kredit turlari"
-BTN_CONTACT  = "📞 Bog'lanish"
-BTN_BRANCHES = "📍 Filiallar"
-
 
 # ===================== FSM =====================
 
@@ -36,18 +33,17 @@ class StartFSM(StatesGroup):
 
 # ===================== KLAVIATURALAR =====================
 
-def main_menu_markup() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
+def main_menu_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
             [
-                KeyboardButton(text=BTN_CREDIT),
-                KeyboardButton(text=BTN_CONTACT),
+                InlineKeyboardButton(text="📊 Kredit turlari", callback_data="credit_types"),
+                InlineKeyboardButton(text="📞 Bog'lanish", callback_data="contact"),
             ],
             [
-                KeyboardButton(text=BTN_BRANCHES),
+                InlineKeyboardButton(text="📍 Filiallar", callback_data="branches"),
             ],
-        ],
-        resize_keyboard=True,
+        ]
     )
 
 
@@ -108,11 +104,14 @@ async def cmd_start(message: types.Message, bot: Bot, state: FSMContext):
     await state.clear()
     user = message.from_user
 
+    # Sheets'dan tekshiramiz: telefon bor yoki yo'q (await — sinxron)
     has_phone = await user_has_phone(user.id)
 
     if has_phone:
+        # Ro'yxatdan o'tgan — darhol asosiy menyu
         await send_promo(bot, user.id)
     else:
+        # Yangi foydalanuvchi — avval ma'lumotlarni saqlаb, telefon so'raymiz
         await save_user(
             user_id=user.id,
             full_name=user.full_name or "",
@@ -136,6 +135,7 @@ async def handle_phone(message: types.Message, bot: Bot, state: FSMContext):
     user = message.from_user
     phone = message.contact.phone_number
 
+    # Telefon raqamini Sheets'ga yozamiz
     await save_user(
         user_id=user.id,
         full_name=user.full_name or "",
@@ -155,6 +155,7 @@ async def handle_phone(message: types.Message, bot: Bot, state: FSMContext):
 
 @router.message(StartFSM.waiting_phone)
 async def waiting_phone_other(message: types.Message):
+    """Telefon tugmasi bosilmasdan boshqa narsa yuborilsa"""
     await message.answer(
         "📱 Iltimos, quyidagi tugmani bosib telefon raqamingizni ulashing:",
         reply_markup=ReplyKeyboardMarkup(
@@ -165,3 +166,12 @@ async def waiting_phone_other(message: types.Message):
             one_time_keyboard=True,
         ),
     )
+
+
+# ===================== ORQAGA =====================
+
+@router.callback_query(F.data == "back_to_menu")
+async def back_to_menu(callback: types.CallbackQuery, bot: Bot):
+    with contextlib.suppress(Exception):
+        await callback.message.delete()
+    await send_promo(bot, callback.from_user.id)

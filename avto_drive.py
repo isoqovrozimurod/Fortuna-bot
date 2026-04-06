@@ -24,7 +24,7 @@ async def avto_drive_info(callback: CallbackQuery, bot: Bot):
         "– Kredit summasi: 5 000 000 so'mgacha\n"
         "– Kredit muddati: 12 oy\n\n"
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
-        "1. Shaxsni tasdiqlovchi hujjat(pasport, id karta, haydovchilik guvohnomasi)\n"
+        "1. Shaxsni tasdiqlovchi hujjat(pasport, id karta)\n"
         "2. Texpasport (qarz oluvchi nomida bo'lgan mashina)\n"
         "3. Sug'urta polisi\n"
     )

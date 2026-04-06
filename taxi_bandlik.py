@@ -24,7 +24,7 @@ async def taxi_bandlik_info(callback: CallbackQuery, bot: Bot):
         "– Kredit summasi: 3 000 000 – 10 000 000 so'm\n"
         "– Kredit muddati: 12 oy\n\n"
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
-        "• Shaxsni tasdiqlovchi hujjat(pasport, id karta, haydovchilik guvohnomasi)\n"
+        "• Shaxsni tasdiqlovchi hujjat(pasport, id karta)\n"
         "• Texpasport (qarz oluvchi nomida bo'lgan mashina)\n"
         "• Sug'urta polisi\n"
         "• Bandlik guvohnomasi\n"

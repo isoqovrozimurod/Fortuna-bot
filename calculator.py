@@ -46,11 +46,11 @@ CFG = {
     },
     "calc_avto_drive": {
         "name": "Avto-Drive mikroqarzi", "rate": 59,
-        "min": 500_000, "max": 5_000_000, "mmin": 12, "mmax": 12,
+        "min": 1_000_000, "max": 5_000_000, "mmin": 12, "mmax": 12,
     },
     "calc_taxi_bandlik": {
         "name": "Taxi-Bandlik mikroqarzi", "rate": 56,
-        "min": 3_000_000, "max": 10_000_000, "mmin": 12, "mmax": 12,
+        "min": 1_000_000, "max": 10_000_000, "mmin": 12, "mmax": 12,
     },
 }
 

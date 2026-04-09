@@ -36,6 +36,7 @@ from filial import router as filial_router
 from reklama_nazorati import router as reklama_router
 from broadcast import router as broadcast_router
 from download import router as download_router
+from scoring import router as scoring_router
 
 
 # =================== LOGGING ===================
@@ -120,6 +121,7 @@ def setup_dispatcher() -> Dispatcher:
     dp.include_router(kredit_admin_router)
     dp.include_router(filial_router)
     dp.include_router(broadcast_router)
+    dp.include_router(scoring_router)
 
     return dp
 

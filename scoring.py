@@ -166,7 +166,8 @@ def max_loan_diff(max_payment: float, rate_annual: float, months: int) -> float:
     return max_payment / denom
 
 
-fmt = lambda n: f"{round(n):,}".replace(",", " ")
+fmt     = lambda n: f"{round(n):,}".replace(",", " ")
+fmt100k = lambda n: f"{int(n // 100_000) * 100_000:,}".replace(",", " ")
 
 
 def calculate_scoring(
@@ -258,9 +259,17 @@ def cancel_kb() -> InlineKeyboardMarkup:
 
 # ===================== HANDLERLAR =====================
 
+def _has_scoring_access(user_id: int) -> bool:
+    """ADMIN_ID, JOB_ID yoki sub_admin bo'lsa ruxsat"""
+    admin_id = int(os.getenv("ADMIN_ID", "0"))
+    job_id   = int(os.getenv("JOB_ID", "0"))
+    return user_id in (admin_id, job_id)
+
+
 @router.message(Command("scoring"))
 async def cmd_scoring(message: Message, state: FSMContext):
-    if not await is_subadmin(message.from_user.id):
+    uid = message.from_user.id
+    if not (_has_scoring_access(uid) or await is_subadmin(uid)):
         await message.answer("⛔ Bu buyruq faqat xodimlar uchun.")
         return
     await state.clear()
@@ -462,15 +471,28 @@ async def get_mavjud_tolovlar(message: Message, state: FSMContext):
         lines.append("❌ <b>KREDIT AJRATILISHI MUMKIN EMAS</b>")
         lines.append(f"⚠️ Qarz yuki {load_pct*100:.1f}% — chegara {limit_pct*100:.0f}% dan oshib ketdi")
 
+    # ── Har bir muddat uchun beriladi/berilmaydi ──
+    lines += ["", "──────────────────────────",
+              "📋 <b>Muddatlar bo'yicha holat (so'ralgan summa):</b>", ""]
+    for t in TERMS[turi]:
+        ann_pay_t  = ann_payment(kredit_summasi, rate, t)
+        load_t     = (ann_pay_t + mavjud) / oylik_daromad if oylik_daromad > 0 else 1.0
+        if load_t <= limit_pct:
+            lines.append(f"  ✅ {t} oy — beriladi "
+                         f"(qarz yuki {load_t*100:.1f}%)")
+        else:
+            lines.append(f"  ❌ {t} oy — berilmaydi "
+                         f"(qarz yuki {load_t*100:.1f}% > {limit_pct*100:.0f}%)")
+
     # ── Maksimal ajratilishi mumkin bo'lgan kredit ──
     lines += ["", "──────────────────────────", "📈 <b>Maksimal ajratilishi mumkin:</b>", ""]
 
     # Annuitet jadval
     lines.append("🔵 <b>Annuitet:</b>")
     for t, v in max_loan.items():
-        ann_max = v["ann"]
+        ann_max = int(v["ann"] // 100_000) * 100_000
         if ann_max > 0:
-            lines.append(f"  {t} oy → <b>{fmt(ann_max)}</b> so'm")
+            lines.append(f"  {t} oy → <b>{fmt100k(v['ann'])}</b> so'm")
         else:
             lines.append(f"  {t} oy → ajratilmaydi")
 
@@ -478,9 +500,9 @@ async def get_mavjud_tolovlar(message: Message, state: FSMContext):
     # Differensial jadval
     lines.append("🟢 <b>Differensial:</b>")
     for t, v in max_loan.items():
-        diff_max = v["diff"]
+        diff_max = int(v["diff"] // 100_000) * 100_000
         if diff_max > 0:
-            lines.append(f"  {t} oy → <b>{fmt(diff_max)}</b> so'm")
+            lines.append(f"  {t} oy → <b>{fmt100k(v['diff'])}</b> so'm")
         else:
             lines.append(f"  {t} oy → ajratilmaydi")
 

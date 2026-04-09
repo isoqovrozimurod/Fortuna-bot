@@ -34,6 +34,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="chanel",      description="Majburiy obuna qo'shish"),
         BotCommand(command="broadcast",   description="Ommaviy xabar yuborish"),
         BotCommand(command="cleanup_users", description="Foydalanuvchilar jadvalini tozalash"),
+        BotCommand(command="scoring", description="Scoring — qarz yuki hisoblash"),
         BotCommand(command="download",      description="Ma'lumot va fayllarni yuklab olish"),
         BotCommand(command="reklama_stat",   description="Reklama statistikasi"),
         BotCommand(command="sync_subadmin",  description="User dan sub_admin ga sinxronlash"),

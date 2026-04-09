@@ -308,10 +308,15 @@ async def cb_kredit_turi(call: CallbackQuery, state: FSMContext):
             reply_markup=ish_joyi_kb(),
         )
     else:
+        min_s = 3_000_000
+        max_s = {"pensiya": 30_000_000, "hamkor": 20_000_000}.get(turi, 50_000_000)
+        await state.update_data(min_summa=min_s, max_summa=max_s)
         await state.set_state(ScoringFSM.kredit_summasi)
         await call.message.answer(
-            "💰 Mijoz olmoqchi bo'lgan kredit summasini kiriting (so'mda):",
+            f"💰 Mijoz olmoqchi bo'lgan kredit summasini kiriting (so'mda):\n"
+            f"📌 Minimal: <b>{fmt(min_s)}</b> | Maksimal: <b>{fmt(max_s)}</b>",
             reply_markup=cancel_kb(),
+            parse_mode="HTML",
         )
 
 
@@ -330,9 +335,13 @@ async def cb_ish_joyi(call: CallbackQuery, state: FSMContext):
     await state.update_data(ish_joyi=ish_joyi)
     await call.answer()
     await state.set_state(ScoringFSM.kredit_summasi)
+    min_s, max_s = 3_000_000, 40_000_000
+    await state.update_data(min_summa=min_s, max_summa=max_s)
     await call.message.edit_text(
-        "💰 Mijoz olmoqchi bo'lgan kredit summasini kiriting (so'mda):",
+        f"💰 Mijoz olmoqchi bo'lgan kredit summasini kiriting (so'mda):\n"
+        f"📌 Minimal: <b>{fmt(min_s)}</b> | Maksimal: <b>{fmt(max_s)}</b>",
         reply_markup=cancel_kb(),
+        parse_mode="HTML",
     )
 
 
@@ -343,8 +352,20 @@ async def get_kredit_summasi(message: Message, state: FSMContext):
         await message.answer("❗ Faqat raqam kiriting:", reply_markup=cancel_kb())
         return
     summa = float(val)
-    if summa <= 0:
-        await message.answer("❗ Summa 0 dan katta bo'lishi kerak:", reply_markup=cancel_kb())
+    data_check = await state.get_data()
+    min_s = data_check.get("min_summa", 3_000_000)
+    max_s = data_check.get("max_summa", 300_000_000)
+    if summa < min_s:
+        await message.answer(
+            f"❗ Minimal kredit summasi: <b>{fmt(min_s)}</b> so'm",
+            reply_markup=cancel_kb(), parse_mode="HTML"
+        )
+        return
+    if summa > max_s:
+        await message.answer(
+            f"❗ Maksimal kredit summasi: <b>{fmt(max_s)}</b> so'm",
+            reply_markup=cancel_kb(), parse_mode="HTML"
+        )
         return
     await state.update_data(kredit_summasi=summa)
 
@@ -506,13 +527,29 @@ async def get_mavjud_tolovlar(message: Message, state: FSMContext):
         else:
             lines.append(f"  {t} oy → ajratilmaydi")
 
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    ortga_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Yangi hisoblash", callback_data="sc_restart")],
+    ])
+    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=ortga_kb)
 
 
-# ===================== CANCEL CALLBACK =====================
+# ===================== CANCEL / RESTART =====================
 
 @router.callback_query(F.data == "sc_cancel")
 async def cb_cancel(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.answer()
     await call.message.edit_text("❌ Scoring bekor qilindi.")
+
+
+@router.callback_query(F.data == "sc_restart")
+async def cb_restart(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await call.answer()
+    await call.message.edit_reply_markup(reply_markup=None)
+    await call.message.answer(
+        "🧮 <b>Scoring — Qarz yuki hisoblash</b>\n\nKredit turini tanlang:",
+        reply_markup=kredit_turi_kb(),
+        parse_mode="HTML",
+    )
+    await state.set_state(ScoringFSM.kredit_turi)

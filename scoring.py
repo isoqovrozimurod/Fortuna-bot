@@ -81,27 +81,19 @@ TERMS = {
 }
 
 # Qarz yuki chegaralari
-def get_limit(kredit_turi: str, monthly_income: float, ish_joyi: str = "") -> float:
-    """Qarz yuki chegarasi (0.0 - 1.0 ko'rinishida)"""
+def get_limit(kredit_turi: str, kredit_summasi: float, ish_joyi: str = "") -> float:
+    """Qarz yuki chegarasi — kredit SUMMASI asosida (0.0 - 1.0)"""
     if kredit_turi == "pensiya":
         return 0.50
     elif kredit_turi == "hamkor":
         return 0.50
     elif kredit_turi == "ish_haqi":
         if ish_joyi == "budjet":
-            # 20M gacha 75%, 20-40M 50%
-            annual = monthly_income * 12
-            if annual <= 20_000_000:
-                return 0.75
-            else:
-                return 0.50
+            # summa <= 20M → 75%, 20M < summa <= 40M → 50%
+            return 0.75 if kredit_summasi <= 20_000_000 else 0.50
         else:  # xususiy
-            # 10M gacha 75%, 10-20M 50%
-            annual = monthly_income * 12
-            if annual <= 10_000_000:
-                return 0.75
-            else:
-                return 0.50
+            # summa <= 10M → 75%, 10M < summa <= 20M → 50%
+            return 0.75 if kredit_summasi <= 10_000_000 else 0.50
     return 0.75
 
 
@@ -114,17 +106,16 @@ LIMIT_TEXT = {
     "ish_haqi": (
         "📌 <b>Ish haqi krediti — qarz yuki chegarasi:</b>\n"
         "• Budjet tashkiloti xodimlari:\n"
-        "  – Yillik daromad 20M gacha → <b>75%</b>\n"
-        "  – Yillik daromad 20–40M → <b>50%</b>\n"
+        "  – Kredit summasi ≤20M → <b>75%</b>\n"
+        "  – Kredit summasi 20M–40M → <b>50%</b>\n"
         "• Xususiy tashkilot xodimlari:\n"
-        "  – Yillik daromad 10M gacha → <b>75%</b>\n"
-        "  – Yillik daromad 10–20M → <b>50%</b>\n"
-        "• Formula: Yillik daromad × 88% ÷ 12 = oylik daromad"
+        "  – Kredit summasi ≤10M → <b>75%</b>\n"
+        "  – Kredit summasi 10M–20M → <b>50%</b>\n"
+        "• Xususiy uchun maksimal kredit: 20 000 000 so'm\n"
     ),
     "hamkor": (
         "📌 <b>Hamkor krediti — qarz yuki chegarasi:</b>\n"
         "• Qarz yuki <b>50%</b> dan oshmasligi kerak\n"
-        "• Formula: Yillik daromad × 88% ÷ 12 = oylik daromad\n"
         "• Muddat: faqat 12 oy"
     ),
 }
@@ -191,7 +182,7 @@ def calculate_scoring(
     """
     terms    = TERMS[kredit_turi]
     min_term = min(terms)
-    limit    = get_limit(kredit_turi, oylik_daromad, ish_joyi)
+    limit    = get_limit(kredit_turi, kredit_summasi, ish_joyi)
 
     # So'ralgan kredit eng qisqa muddatdagi oylik to'lovi
     ann_pay  = ann_payment(kredit_summasi, rate, min_term)
@@ -200,6 +191,14 @@ def calculate_scoring(
     # Qarz yuki (annuitet asosida, konservativ)
     load_pct = (ann_pay + mavjud_tolovlar) / oylik_daromad if oylik_daromad > 0 else 1.0
 
+    # Kredit turi uchun maksimal ruxsat etilgan summa
+    max_caps = {
+        "pensiya":  30_000_000,
+        "hamkor":   20_000_000,
+        "ish_haqi": 20_000_000 if ish_joyi == "xususiy" else 40_000_000,
+    }
+    max_cap = max_caps.get(kredit_turi, 40_000_000)
+
     # Maksimal ajratilishi mumkin bo'lgan kredit
     max_loan = {}
     for t in terms:
@@ -207,10 +206,9 @@ def calculate_scoring(
         if free_payment <= 0:
             max_loan[t] = {"ann": 0, "diff": 0}
         else:
-            max_loan[t] = {
-                "ann":  max_loan_from_payment(free_payment, rate, t),
-                "diff": max_loan_diff(free_payment, rate, t),
-            }
+            ann_max  = min(max_loan_from_payment(free_payment, rate, t), max_cap)
+            diff_max = min(max_loan_diff(free_payment, rate, t), max_cap)
+            max_loan[t] = {"ann": ann_max, "diff": diff_max}
 
     return {
         "load_pct":               load_pct,
@@ -380,8 +378,7 @@ async def get_kredit_summasi(message: Message, state: FSMContext):
         )
     else:
         await message.answer(
-            "💼 Mijozning yillik daromadini kiriting (so'mda):\n"
-            "<i>(Oylik daromad = Yillik × 88% ÷ 12)</i>",
+            "💼 Mijozning yillik daromadini kiriting (so'mda):\n",
             reply_markup=cancel_kb(),
             parse_mode="HTML",
         )
@@ -470,7 +467,7 @@ async def get_mavjud_tolovlar(message: Message, state: FSMContext):
         lines.append(f"🏦 Pensiya: <b>{fmt(oylik_daromad)}</b> so'm")
     else:
         lines.append(f"📈 Yillik daromad: <b>{fmt(yillik_daromad)}</b> so'm")
-        lines.append(f"💵 Oylik daromad (×88%÷12): <b>{fmt(oylik_daromad)}</b> so'm")
+        lines.append(f"💵 Oylik daromad: <b>{fmt(oylik_daromad)}</b> so'm")
 
     if mavjud > 0:
         lines.append(f"📋 Mavjud kredit to'lovlari: <b>{fmt(mavjud)}</b> so'm")

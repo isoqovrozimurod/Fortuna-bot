@@ -142,11 +142,20 @@ def _save_user_sync(
     row_idx = _find_user_row_sync(user_id)
 
     if row_idx is not None:
-        ws.update_cell(row_idx, 3, uname)
-        ws.update_cell(row_idx, 4, first_name)
-        ws.update_cell(row_idx, 5, last_name)
+        # Mavjud foydalanuvchi — username/ism/familiya yangilaymiz
+        updates = [
+            (row_idx, 3, uname),
+            (row_idx, 4, first_name),
+            (row_idx, 5, last_name),
+        ]
         if phone:
-            ws.update_cell(row_idx, 6, phone)
+            updates.append((row_idx, 6, phone))
+        for r, c, v in updates:
+            ws.update_cell(r, c, v)
+        # Holati "Bloklagan" bo'lsa "Faol" ga qaytaramiz
+        current_holat = ws.cell(row_idx, 8).value or ""
+        if phone and current_holat.strip() == "Bloklagan":
+            ws.update_cell(row_idx, 8, "Faol")
     else:
         _cleanup_sheet_sync()
         all_vals = ws.get_all_values()
@@ -251,22 +260,28 @@ async def save_user(
     full_name: str = "",
     username: str = "",
     phone: str = "",
-) -> None:
+) -> bool:
+    """
+    Foydalanuvchini Sheets ga saqlaydi.
+    Muvaffaqiyatli bo'lsa True, xato bo'lsa False qaytaradi.
+    """
     async with _register_lock:
         if user_id in _registering:
-            return
+            return True   # Parallel yozilmoqda — xato emas
         _registering.add(user_id)
     try:
-        parts = (full_name or "").split(" ", 1)
+        parts      = (full_name or "").split(" ", 1)
         first_name = parts[0] if parts else ""
-        last_name = parts[1] if len(parts) > 1 else ""
+        last_name  = parts[1] if len(parts) > 1 else ""
 
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None, _save_user_sync, user_id, first_name, last_name, username, phone
         )
+        return True
     except Exception as e:
-        logger.warning(f"Foydalanuvchi saqlashda xato: {e}")
+        logger.error(f"Foydalanuvchi saqlashda xato (id={user_id}): {e}")
+        return False
     finally:
         async with _register_lock:
             _registering.discard(user_id)

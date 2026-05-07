@@ -342,7 +342,10 @@ async def cb_filial_detail(call: CallbackQuery, bot: Bot):
     coords = await resolve_coords(url) if url else None
 
     back_cb = f"reg_{region}" if region else "list_branches"
-            
+
+    back_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data=back_cb)]
+    ])
     
     text = _admin_text(b) if _is_admin(call.from_user.id) else _user_text(b)
 
@@ -355,10 +358,7 @@ async def cb_filial_detail(call: CallbackQuery, bot: Bot):
     if coords:
         await bot.send_location(chat_id=call.from_user.id,
                                 latitude=coords[0], longitude=coords[1])
-    back_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Orqaga", callback_data=back_cb)]
-    ])
-
+    
 # ── Eng yaqin filial ────────────────────────────────────────────
 class FilialFSM(StatesGroup):
     waiting_location = State()

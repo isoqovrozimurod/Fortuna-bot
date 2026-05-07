@@ -25,16 +25,16 @@ from config import load_config
 logger = logging.getLogger(__name__)
 router = Router()
 
-# ===================== CONFIG =====================
+# ── Config ─────────────────────────────────────────────────────
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
-SPREADSHEET_ID = "1UU87w2q9zk8q5_3pQqfVhp0Zp2hnU70bWWgu1R9q3No"
-SHEET_NAME     = "Лист1"
-ISHONCH_TELEFON = "+998 55 808 40 00"
+SPREADSHEET_ID  = "1UU87w2q9zk8q5_3pQqfVhp0Zp2hnU70bWWgu1R9q3No"
+SHEET_NAME      = "malumotlar"
+CALL_CENTER     = "+998 55 808 40 00"
 
-# Ustun nomlari — Sheet bilan mos
+# Sheets ustun nomlari
 COL = {
     "id":          "T/r",
     "viloyat":     "Viloyat",
@@ -48,22 +48,21 @@ COL = {
     "kredit":      "Kredit bo'limi",
     "unduruv":     "Unduruv bo'limi",
     "buxgalteriya":"Buxgalteriya",
-    "lokatsiya":   "Lokatsiya",
+    "lokatsiya":   "Lokatsiya",       # qisqa maps.app.goo.gl (eski)
     "ichki":       "Ichki nomer",
     "masul":       "Biriktirilgan masul xodim",
+    "location":    "Location",        # to'liq Google Maps URL (koordinatali)
 }
 
 _gc: gspread.Client | None = None
 _coords_cache: dict[str, tuple[float, float]] = {}
 
 
-# ===================== SHEETS =====================
+# ── Sheets ─────────────────────────────────────────────────────
 def _get_gc() -> gspread.Client:
     global _gc
     if _gc is None:
-        b64 = os.getenv("GOOGLE_CREDENTIALS_B64")
-        if not b64:
-            raise RuntimeError("GOOGLE_CREDENTIALS_B64 topilmadi")
+        b64   = os.getenv("GOOGLE_CREDENTIALS_B64")
         info  = json.loads(base64.b64decode(b64).decode())
         creds = Credentials.from_service_account_info(info, scopes=SCOPES)
         _gc   = gspread.authorize(creds)
@@ -91,13 +90,17 @@ def _is_admin(user_id: int) -> bool:
         return False
 
 
-# ===================== KOORDINATA =====================
+# ── Koordinata ─────────────────────────────────────────────────
 def _parse_coords(url: str) -> tuple[float, float] | None:
+    """
+    Google Maps URL dan koordinata ajratib oladi.
+    @lat,lng  yoki  !3dLAT!4dLNG  yoki  ?q=lat,lng
+    """
     patterns = [
-        r"!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)",
-        r"[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)",
-        r"/place/[^@]+@(-?\d+\.\d+),(-?\d+\.\d+)",
-        r"@(-?\d+\.\d+),(-?\d+\.\d+)",
+        r"!3d(-?\d+\.?\d+)!4d(-?\d+\.?\d+)",
+        r"[?&]q=(-?\d+\.?\d+),(-?\d+\.?\d+)",
+        r"/place/[^@]+@(-?\d+\.?\d+),(-?\d+\.?\d+)",
+        r"@(-?\d+\.?\d+),(-?\d+\.?\d+)",
     ]
     for p in patterns:
         m = re.search(p, url)
@@ -106,101 +109,115 @@ def _parse_coords(url: str) -> tuple[float, float] | None:
     return None
 
 
-async def resolve_coords(maps_url: str) -> tuple[float, float] | None:
-    if not maps_url:
+async def resolve_coords(url: str) -> tuple[float, float] | None:
+    if not url:
         return None
-    if maps_url in _coords_cache:
-        return _coords_cache[maps_url]
+    if url in _coords_cache:
+        return _coords_cache[url]
 
-    # URL ning o'zini tekshiramiz
-    coords = _parse_coords(maps_url)
+    # To'g'ridan URL da koordinata bormi?
+    coords = _parse_coords(url)
     if coords:
-        _coords_cache[maps_url] = coords
+        _coords_cache[url] = coords
         return coords
 
-    # Redirect orqali final URL dan olamiz
+    # Redirect orqali ochib ko'ramiz
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession() as s:
-            async with s.get(maps_url, allow_redirects=True,
+            async with s.get(url, allow_redirects=True,
                              timeout=aiohttp.ClientTimeout(total=15),
                              headers=headers) as resp:
                 final_url = str(resp.url)
-                body = await resp.text(errors="ignore")
-
+                body      = await resp.text(errors="ignore")
         coords = _parse_coords(final_url) or _parse_coords(body)
         if coords:
-            _coords_cache[maps_url] = coords
+            _coords_cache[url] = coords
             return coords
-        logger.warning(f"Koordinata topilmadi: {maps_url} → {final_url[:80]}")
     except Exception as e:
-        logger.warning(f"Koordinata xato ({maps_url}): {e}")
+        logger.warning(f"Koordinata xato ({url[:60]}): {e}")
     return None
 
 
-def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+def _haversine(lat1, lon1, lat2, lon2) -> float:
     R = 6371.0
-    dlat, dlon = radians(lat2 - lat1), radians(lon2 - lon1)
-    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
-    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+    d = radians(lat2-lat1), radians(lon2-lon1)
+    a = sin(d[0]/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(d[1]/2)**2
+    return R * 2 * atan2(sqrt(a), sqrt(1-a))
 
 
-# ===================== MATN QURISHG =====================
+# ── Yordamchi ──────────────────────────────────────────────────
 def _g(b: dict, key: str) -> str:
     return str(b.get(COL[key], "") or "").strip()
 
 
+def _maps_url(b: dict) -> str:
+    """Location (to'liq URL) bor bo'lsa uni, yo'q bo'lsa Lokatsiya (qisqa) ni qaytaradi."""
+    full = _g(b, "location")
+    if full:
+        return full
+    return _g(b, "lokatsiya")
+
+
+# ── Matn qurishg ────────────────────────────────────────────────
 def _user_text(b: dict) -> str:
-    maps_url = _g(b, "lokatsiya")
-    lines = [
-        f"🏢 <b>{_g(b, 'filial')}</b>",
-        f"",
-        f"📍 Manzil: {_g(b, 'manzil')}",
+    url     = _maps_url(b)
+    ichki   = _g(b, "ichki")
+    lines   = [f"🏢 <b>{_g(b, 'filial')}</b>", ""]
+    lines.append(f"📍 Manzil: {_g(b, 'manzil')}")
+
+    # Telefon raqamlari
+    tel_items = [
+        ("📞 Qabulxona",      "qabulxona"),
+        ("💳 Kredit bo'limi", "kredit"),
+        ("📤 Unduruv",        "unduruv"),
+        ("📊 Buxgalteriya",   "buxgalteriya"),
     ]
-    tel_parts = []
-    if _g(b, "qabulxona"):   tel_parts.append(f"📞 Qabulxona: {_g(b, 'qabulxona')}")
-    if _g(b, "kredit"):      tel_parts.append(f"💳 Kredit bo'limi: {_g(b, 'kredit')}")
-    if _g(b, "unduruv"):     tel_parts.append(f"📤 Unduruv: {_g(b, 'unduruv')}")
-    if _g(b, "buxgalteriya"):tel_parts.append(f"📊 Buxgalteriya: {_g(b, 'buxgalteriya')}")
-    if tel_parts:
-        lines.append("")
-        lines.extend(tel_parts)
-    if _g(b, "ichki"):
-        lines.append(f"🔢 Ichki nomer: {_g(b, 'ichki')}")
-    if ISHONCH_TELEFON:
-        lines.append(f"\n📲 Ishonch telefoni: {ISHONCH_TELEFON}")
-    if maps_url:
-        lines.append(f"\n🗺 <a href='{maps_url}'>Google Maps</a>")
+    for label, key in tel_items:
+        v = _g(b, key)
+        if v:
+            lines.append(f"{label}: {v}")
+
+    # Call center + ichki nomer
+    lines.append("")
+    lines.append(f"📲 Call center: <b>{CALL_CENTER}</b>")
+    if ichki:
+        lines.append(f"🔢 Ichki nomer: <b>{ichki}</b>")
+        lines.append(
+            f"<i>(Qo'ng'iroq qiling va <b>{ichki}</b> ni tering)</i>"
+        )
+
+    if url:
+        lines.append(f"\n🗺 <a href='{url}'>Google Maps</a>")
     return "\n".join(lines)
 
 
 def _admin_text(b: dict) -> str:
-    maps_url = _g(b, "lokatsiya")
+    url   = _maps_url(b)
+    ichki = _g(b, "ichki")
     lines = [
-        f"🏢 <b>{_g(b, 'filial')}</b>",
-        f"",
+        f"🏢 <b>{_g(b, 'filial')}</b>", "",
         f"🏙 Viloyat: {_g(b, 'viloyat')}",
         f"🏘 Tuman: {_g(b, 'tuman')}",
-        f"📍 Manzil: {_g(b, 'manzil')}",
-        f"",
+        f"📍 Manzil: {_g(b, 'manzil')}", "",
         f"👤 Boshqaruvchi: {_g(b, 'boshliq')}",
         f"📱 Shaxsiy: {_g(b, 'shaxsiy_tel')}",
-        f"☎️ Filial: {_g(b, 'filial_tel')}",
-        f"",
+        f"☎️ Filial tel: {_g(b, 'filial_tel')}", "",
         f"📞 Qabulxona: {_g(b, 'qabulxona')}",
         f"💳 Kredit bo'limi: {_g(b, 'kredit')}",
         f"📤 Unduruv: {_g(b, 'unduruv')}",
         f"📊 Buxgalteriya: {_g(b, 'buxgalteriya')}",
     ]
-    if _g(b, "ichki"):
-        lines.append(f"🔢 Ichki nomer: {_g(b, 'ichki')}")
+    if ichki:
+        lines.append(f"🔢 Ichki nomer: {ichki}")
     lines.append(f"👷 Masul xodim: {_g(b, 'masul')}")
-    if maps_url:
-        lines.append(f"\n🗺 <a href='{maps_url}'>Google Maps</a>")
+    lines.append(f"📲 Call center: {CALL_CENTER}")
+    if url:
+        lines.append(f"\n🗺 <a href='{url}'>Google Maps</a>")
     return "\n".join(lines)
 
 
-# ===================== KLAVIATURALAR =====================
+# ── Klaviaturalar ───────────────────────────────────────────────
 def _branches_main_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -260,8 +277,7 @@ def _nearest_kb(results: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-# ===================== HANDLERLAR =====================
-
+# ── Handlerlar ──────────────────────────────────────────────────
 @router.callback_query(F.data == "branches")
 async def cb_branches(call: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -292,7 +308,7 @@ async def cb_list_branches(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("reg_"))
 async def cb_region(call: CallbackQuery):
-    region = call.data[4:]
+    region   = call.data[4:]
     branches = await get_all_branches()
     filtered = [b for b in branches if _g(b, "viloyat") == region]
     if not filtered:
@@ -321,9 +337,9 @@ async def cb_filial_detail(call: CallbackQuery, bot: Bot):
 
     await call.answer()
 
-    region   = _g(b, "viloyat")
-    maps_url = _g(b, "lokatsiya")
-    coords   = await resolve_coords(maps_url) if maps_url else None
+    region = _g(b, "viloyat")
+    url    = _maps_url(b)
+    coords = await resolve_coords(url) if url else None
 
     back_cb = f"reg_{region}" if region else "list_branches"
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -344,8 +360,7 @@ async def cb_filial_detail(call: CallbackQuery, bot: Bot):
                                 latitude=coords[0], longitude=coords[1])
 
 
-# ===================== ENG YAQIN FILIAL =====================
-
+# ── Eng yaqin filial ────────────────────────────────────────────
 class FilialFSM(StatesGroup):
     waiting_location = State()
 
@@ -382,19 +397,19 @@ async def process_location(message: Message, state: FSMContext):
     branches = await get_all_branches()
 
     async def _with_dist(b: dict) -> dict | None:
-        url    = _g(b, "lokatsiya")
+        url    = _maps_url(b)
         coords = await resolve_coords(url) if url else None
         if not coords:
             return None
         dist = _haversine(user_lat, user_lng, coords[0], coords[1])
-        return {**b, "_dist": dist, "_coords": coords}
+        return {**b, "_dist": dist}
 
     results = await asyncio.gather(*[_with_dist(b) for b in branches])
     valid   = sorted([r for r in results if r], key=lambda x: x["_dist"])[:3]
 
     if not valid:
         await message.answer(
-            "❌ Filiallar koordinatasi aniqlanmadi. Keyinroq urinib ko'ring.",
+            "❌ Filiallar koordinatasi aniqlanmadi.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔙 Orqaga", callback_data="branches")]
             ])
@@ -407,8 +422,7 @@ async def process_location(message: Message, state: FSMContext):
     )
 
 
-# ===================== ADMIN BUYRUQLARI =====================
-
+# ── Admin buyruqlari ────────────────────────────────────────────
 @router.message(Command("filiallar"))
 async def cmd_filiallar(message: Message, state: FSMContext):
     if not _is_admin(message.from_user.id):

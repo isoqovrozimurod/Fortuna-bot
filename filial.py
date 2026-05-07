@@ -342,6 +342,11 @@ async def cb_filial_detail(call: CallbackQuery, bot: Bot):
     coords = await resolve_coords(url) if url else None
 
     back_cb = f"reg_{region}" if region else "list_branches"
+    
+    if coords:
+        await bot.send_location(chat_id=call.from_user.id,
+                                latitude=coords[0], longitude=coords[1])
+        
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data=back_cb)]
     ])
@@ -354,11 +359,6 @@ async def cb_filial_detail(call: CallbackQuery, bot: Bot):
     except Exception:
         await call.message.answer(text, reply_markup=back_kb,
                                   parse_mode="HTML", disable_web_page_preview=True)
-
-    if coords:
-        await bot.send_location(chat_id=call.from_user.id,
-                                latitude=coords[0], longitude=coords[1])
-
 
 # ── Eng yaqin filial ────────────────────────────────────────────
 class FilialFSM(StatesGroup):

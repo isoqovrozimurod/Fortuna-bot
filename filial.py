@@ -244,14 +244,19 @@ def _filials_kb(branches: list[dict], region: str) -> InlineKeyboardMarkup:
     filtered = [b for b in branches if _g(b, "viloyat") == region]
     rows = []
     for i in range(0, len(filtered), 2):
+        def _safe_id(b):
+            try:
+                return str(int(float(_g(b, "id"))))
+            except (ValueError, TypeError):
+                return _g(b, "id")
         row = [InlineKeyboardButton(
             text=_g(filtered[i], "filial"),
-            callback_data=f"fil_{_g(filtered[i], 'id')}"
+            callback_data=f"fil_{_safe_id(filtered[i])}"
         )]
         if i + 1 < len(filtered):
             row.append(InlineKeyboardButton(
                 text=_g(filtered[i+1], "filial"),
-                callback_data=f"fil_{_g(filtered[i+1], 'id')}"
+                callback_data=f"fil_{_safe_id(filtered[i+1])}"
             ))
         rows.append(row)
     rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="list_branches")])
@@ -330,7 +335,12 @@ async def cb_filial_detail(call: CallbackQuery, bot: Bot):
         return
 
     branches = await get_all_branches()
-    b = next((x for x in branches if str(_g(x, "id")) == str(filial_id)), None)
+    def _id_eq(val: str, fid: int) -> bool:
+        try:
+            return int(float(val)) == fid
+        except (ValueError, TypeError):
+            return False
+    b = next((x for x in branches if _id_eq(_g(x, "id"), filial_id)), None)
     if not b:
         await call.answer("❌ Filial topilmadi", show_alert=True)
         return
@@ -342,23 +352,26 @@ async def cb_filial_detail(call: CallbackQuery, bot: Bot):
     coords = await resolve_coords(url) if url else None
 
     back_cb = f"reg_{region}" if region else "list_branches"
-
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data=back_cb)]
     ])
-    
+
     text = _admin_text(b) if _is_admin(call.from_user.id) else _user_text(b)
 
+    # 1. Matn + ortga tugmasi
     try:
         await call.message.edit_text(text, reply_markup=back_kb,
                                      parse_mode="HTML", disable_web_page_preview=True)
     except Exception:
         await call.message.answer(text, reply_markup=back_kb,
                                   parse_mode="HTML", disable_web_page_preview=True)
+
+    # 2. Lokatsiya
     if coords:
         await bot.send_location(chat_id=call.from_user.id,
                                 latitude=coords[0], longitude=coords[1])
-    
+
+
 # ── Eng yaqin filial ────────────────────────────────────────────
 class FilialFSM(StatesGroup):
     waiting_location = State()

@@ -19,6 +19,7 @@ async def hamkor_info(callback: CallbackQuery, bot: Bot):
         "-dastlabki 30 kun foizsiz\n"
         "- Kredit muddati: 12 oy\n"
         "- Kredit summasi: 3 - 20 mln so'mgacha\n"
+        "📋 <b>Talab qilinadi: Pasport va ish haqi bank plastik kartasi\n"
     )
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_hamkor")],

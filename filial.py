@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import asyncio
+import contextlib
 import aiohttp
 import gspread
 from math import radians, sin, cos, sqrt, atan2
@@ -30,11 +31,10 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
-SPREADSHEET_ID  = "1UU87w2q9zk8q5_3pQqfVhp0Zp2hnU70bWWgu1R9q3No"
-SHEET_NAME      = "malumotlar"
-CALL_CENTER     = "+998 55 808 40 00"
+SPREADSHEET_ID = "1UU87w2q9zk8q5_3pQqfVhp0Zp2hnU70bWWgu1R9q3No"
+SHEET_NAME     = "malumotlar"
+CALL_CENTER    = "+998 55 808 40 00"
 
-# Sheets ustun nomlari
 COL = {
     "id":          "T/r",
     "viloyat":     "Viloyat",
@@ -48,14 +48,16 @@ COL = {
     "kredit":      "Kredit bo'limi",
     "unduruv":     "Unduruv bo'limi",
     "buxgalteriya":"Buxgalteriya",
-    "lokatsiya":   "Lokatsiya",       # qisqa maps.app.goo.gl (eski)
+    "lokatsiya":   "Lokatsiya",
     "ichki":       "Ichki nomer",
     "masul":       "Biriktirilgan masul xodim",
-    "location":    "Location",        # to'liq Google Maps URL (koordinatali)
+    "location":    "Location",
 }
 
 _gc: gspread.Client | None = None
 _coords_cache: dict[str, tuple[float, float]] = {}
+# Barcha filiallar keshi — bir sessiyada bir marta yuklanadi
+_branches_cache: list[dict] | None = None
 
 
 # ── Sheets ─────────────────────────────────────────────────────
@@ -69,7 +71,10 @@ def _get_gc() -> gspread.Client:
     return _gc
 
 
-async def get_all_branches() -> list[dict]:
+async def get_all_branches(force: bool = False) -> list[dict]:
+    global _branches_cache
+    if _branches_cache is not None and not force:
+        return _branches_cache
     try:
         loop = asyncio.get_running_loop()
         def _fetch():
@@ -77,10 +82,11 @@ async def get_all_branches() -> list[dict]:
             ws = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
             return ws.get_all_records()
         records = await loop.run_in_executor(None, _fetch)
-        return [r for r in records if r.get(COL["filial"])]
+        _branches_cache = [r for r in records if r.get(COL["filial"])]
+        return _branches_cache
     except Exception as e:
         logger.error(f"Branches fetch xato: {e}")
-        return []
+        return _branches_cache or []
 
 
 def _is_admin(user_id: int) -> bool:
@@ -92,10 +98,6 @@ def _is_admin(user_id: int) -> bool:
 
 # ── Koordinata ─────────────────────────────────────────────────
 def _parse_coords(url: str) -> tuple[float, float] | None:
-    """
-    Google Maps URL dan koordinata ajratib oladi.
-    @lat,lng  yoki  !3dLAT!4dLNG  yoki  ?q=lat,lng
-    """
     patterns = [
         r"!3d(-?\d+\.?\d+)!4d(-?\d+\.?\d+)",
         r"[?&]q=(-?\d+\.?\d+),(-?\d+\.?\d+)",
@@ -114,14 +116,10 @@ async def resolve_coords(url: str) -> tuple[float, float] | None:
         return None
     if url in _coords_cache:
         return _coords_cache[url]
-
-    # To'g'ridan URL da koordinata bormi?
     coords = _parse_coords(url)
     if coords:
         _coords_cache[url] = coords
         return coords
-
-    # Redirect orqali ochib ko'ramiz
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession() as s:
@@ -141,9 +139,9 @@ async def resolve_coords(url: str) -> tuple[float, float] | None:
 
 def _haversine(lat1, lon1, lat2, lon2) -> float:
     R = 6371.0
-    d = radians(lat2-lat1), radians(lon2-lon1)
+    d = radians(lat2 - lat1), radians(lon2 - lon1)
     a = sin(d[0]/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(d[1]/2)**2
-    return R * 2 * atan2(sqrt(a), sqrt(1-a))
+    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
 
 
 # ── Yordamchi ──────────────────────────────────────────────────
@@ -152,41 +150,30 @@ def _g(b: dict, key: str) -> str:
 
 
 def _maps_url(b: dict) -> str:
-    """Location (to'liq URL) bor bo'lsa uni, yo'q bo'lsa Lokatsiya (qisqa) ni qaytaradi."""
     full = _g(b, "location")
-    if full:
-        return full
-    return _g(b, "lokatsiya")
+    return full if full else _g(b, "lokatsiya")
 
 
-# ── Matn qurishg ────────────────────────────────────────────────
+# ── Matn ───────────────────────────────────────────────────────
 def _user_text(b: dict) -> str:
-    url     = _maps_url(b)
-    ichki   = _g(b, "ichki")
-    lines   = [f"🏢 <b>{_g(b, 'filial')}</b>", ""]
+    url   = _maps_url(b)
+    ichki = _g(b, "ichki")
+    lines = [f"🏢 <b>{_g(b, 'filial')}</b>", ""]
     lines.append(f"📍 Manzil: {_g(b, 'manzil')}")
-
-    # Telefon raqamlari
-    tel_items = [
+    for label, key in [
         ("📞 Qabulxona",      "qabulxona"),
         ("💳 Kredit bo'limi", "kredit"),
         ("📤 Unduruv",        "unduruv"),
         ("📊 Buxgalteriya",   "buxgalteriya"),
-    ]
-    for label, key in tel_items:
+    ]:
         v = _g(b, key)
         if v:
             lines.append(f"{label}: {v}")
-
-    # Call center + ichki nomer
     lines.append("")
     lines.append(f"📲 Call center: <b>{CALL_CENTER}</b>")
     if ichki:
         lines.append(f"🔢 Ichki nomer: <b>{ichki}</b>")
-        lines.append(
-            f"<i>(Qo'ng'iroq qiling va <b>{ichki}</b> ni tering)</i>"
-        )
-
+        lines.append(f"<i>(Qo'ng'iroq qiling va <b>{ichki}</b> ni tering)</i>")
     if url:
         lines.append(f"\n🗺 <a href='{url}'>Google Maps</a>")
     return "\n".join(lines)
@@ -234,30 +221,23 @@ def _regions_kb(branches: list[dict]) -> InlineKeyboardMarkup:
     for i in range(0, len(regions), 2):
         row = [InlineKeyboardButton(text=regions[i], callback_data=f"reg_{regions[i]}")]
         if i + 1 < len(regions):
-            row.append(InlineKeyboardButton(text=regions[i+1], callback_data=f"reg_{regions[i+1]}"))
+            row.append(InlineKeyboardButton(
+                text=regions[i + 1], callback_data=f"reg_{regions[i + 1]}"))
         rows.append(row)
     rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="branches")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _filials_kb(branches: list[dict], region: str) -> InlineKeyboardMarkup:
-    filtered = [b for b in branches if _g(b, "viloyat") == region]
+    """branches ro'yxatidagi INDEX ni callback da ishlatadi — T/r ga bog'liq emas."""
+    filtered = [(i, b) for i, b in enumerate(branches) if _g(b, "viloyat") == region]
     rows = []
-    for i in range(0, len(filtered), 2):
-        def _safe_id(b):
-            try:
-                return str(int(float(_g(b, "id"))))
-            except (ValueError, TypeError):
-                return _g(b, "id")
-        row = [InlineKeyboardButton(
-            text=_g(filtered[i], "filial"),
-            callback_data=f"fil_{_safe_id(filtered[i])}"
-        )]
-        if i + 1 < len(filtered):
-            row.append(InlineKeyboardButton(
-                text=_g(filtered[i+1], "filial"),
-                callback_data=f"fil_{_safe_id(filtered[i+1])}"
-            ))
+    for j in range(0, len(filtered), 2):
+        idx0, b0 = filtered[j]
+        row = [InlineKeyboardButton(text=_g(b0, "filial"), callback_data=f"fil_{idx0}")]
+        if j + 1 < len(filtered):
+            idx1, b1 = filtered[j + 1]
+            row.append(InlineKeyboardButton(text=_g(b1, "filial"), callback_data=f"fil_{idx1}"))
         rows.append(row)
     rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="list_branches")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -277,7 +257,8 @@ def _nearest_kb(results: list[dict]) -> InlineKeyboardMarkup:
     rows = []
     for r in results:
         label = f"{_g(r, 'filial')} — {r['_dist']:.1f} km"
-        rows.append([InlineKeyboardButton(text=label, callback_data=f"fil_{_g(r, 'id')}")])
+        idx   = r["_idx"]
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"fil_{idx}")])
     rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="branches")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -289,13 +270,13 @@ async def cb_branches(call: CallbackQuery, state: FSMContext):
     await call.answer()
     text = "📍 <b>Filiallar</b>\n\nQuyidagilardan birini tanlang:"
     try:
-        await call.message.edit_text(text, reply_markup=_branches_main_kb(), parse_mode="HTML")
+        await call.message.edit_text(
+            text, reply_markup=_branches_main_kb(), parse_mode="HTML")
     except Exception:
-        try:
+        with contextlib.suppress(Exception):
             await call.message.delete()
-        except Exception:
-            pass
-        await call.message.answer(text, reply_markup=_branches_main_kb(), parse_mode="HTML")
+        await call.message.answer(
+            text, reply_markup=_branches_main_kb(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "list_branches")
@@ -320,56 +301,112 @@ async def cb_region(call: CallbackQuery):
         await call.answer("❌ Bu viloyatda filial topilmadi", show_alert=True)
         return
     await call.answer()
-    await call.message.edit_text(
-        f"🏙 <b>{region}</b> — {len(filtered)} ta filial\n\nFilialni tanlang:",
-        reply_markup=_filials_kb(branches, region), parse_mode="HTML",
-    )
+    try:
+        await call.message.edit_text(
+            f"🏙 <b>{region}</b> — {len(filtered)} ta filial\n\nFilialni tanlang:",
+            reply_markup=_filials_kb(branches, region), parse_mode="HTML",
+        )
+    except Exception:
+        await call.message.answer(
+            f"🏙 <b>{region}</b> — {len(filtered)} ta filial\n\nFilialni tanlang:",
+            reply_markup=_filials_kb(branches, region), parse_mode="HTML",
+        )
 
 
 @router.callback_query(F.data.startswith("fil_"))
-async def cb_filial_detail(call: CallbackQuery, bot: Bot):
+async def cb_filial_detail(call: CallbackQuery, bot: Bot, state: FSMContext):
+    # callback data: "fil_{idx}" yoki "fil_{idx}_{del_ids}"
+    raw = call.data[4:]
+
     try:
-        filial_id = int(call.data[4:])
+        idx = int(raw)
     except ValueError:
-        await call.answer("Xato", show_alert=True)
+        await call.answer("❌ Xato", show_alert=True)
         return
 
     branches = await get_all_branches()
-    def _id_eq(val: str, fid: int) -> bool:
-        try:
-            return int(float(val)) == fid
-        except (ValueError, TypeError):
-            return False
-    b = next((x for x in branches if _id_eq(_g(x, "id"), filial_id)), None)
-    if not b:
+    if idx < 0 or idx >= len(branches):
         await call.answer("❌ Filial topilmadi", show_alert=True)
         return
 
+    b = branches[idx]
     await call.answer()
 
+    uid    = call.from_user.id
     region = _g(b, "viloyat")
     url    = _maps_url(b)
     coords = await resolve_coords(url) if url else None
+    text   = _admin_text(b) if _is_admin(uid) else _user_text(b)
 
-    back_cb = f"reg_{region}" if region else "list_branches"
-    back_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Orqaga", callback_data=back_cb)]
-    ])
+    # Ortga callback: oldingi xabarlarni o'chirish uchun IDs saqlash
+    # format: filback_{region}_{loc_id}_{text_id}
+    # oldin yuborilgan xabarlarni o'chirib tashlaymiz (agar FSM da saqlangan bo'lsa)
+    prev = await state.get_data()
+    for mid in prev.get("filial_msg_ids", []):
+        with contextlib.suppress(Exception):
+            await bot.delete_message(uid, mid)
 
-    text = _admin_text(b) if _is_admin(call.from_user.id) else _user_text(b)
+    # 1. Avval asosiy xabarni o'chirib, lokatsiya + matn yuboramiz
+    with contextlib.suppress(Exception):
+        await call.message.delete()
 
-    # 1. Matn + ortga tugmasi
-    try:
-        await call.message.edit_text(text, reply_markup=back_kb,
-                                     parse_mode="HTML", disable_web_page_preview=True)
-    except Exception:
-        await call.message.answer(text, reply_markup=back_kb,
-                                  parse_mode="HTML", disable_web_page_preview=True)
+    msg_ids = []
 
     # 2. Lokatsiya
     if coords:
-        await bot.send_location(chat_id=call.from_user.id,
-                                latitude=coords[0], longitude=coords[1])
+        loc_msg = await bot.send_location(uid, latitude=coords[0], longitude=coords[1])
+        msg_ids.append(loc_msg.message_id)
+
+    # 3. Matn + Ortga tugmasi
+    back_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"filback_{region}")]
+    ])
+    txt_msg = await bot.send_message(
+        uid, text, reply_markup=back_kb,
+        parse_mode="HTML", disable_web_page_preview=True,
+    )
+    msg_ids.append(txt_msg.message_id)
+
+    # FSM da saqlash — "Ortga" bosilganda o'chirish uchun
+    await state.update_data(filial_msg_ids=msg_ids, filial_region=region)
+
+
+@router.callback_query(F.data.startswith("filback_"))
+async def cb_filial_back(call: CallbackQuery, bot: Bot, state: FSMContext):
+    """Filial ma'lumotlarini yopib, viloyat ro'yxatiga qaytaradi."""
+    await call.answer()
+
+    uid  = call.from_user.id
+    data = await state.get_data()
+
+    # Oldingi xabarlarni o'chiramiz
+    for mid in data.get("filial_msg_ids", []):
+        with contextlib.suppress(Exception):
+            await bot.delete_message(uid, mid)
+
+    # call.message ni ham o'chiramiz
+    with contextlib.suppress(Exception):
+        await call.message.delete()
+
+    await state.update_data(filial_msg_ids=[], filial_region="")
+
+    # Viloyat ro'yxatini qayta ko'rsatamiz
+    region   = call.data[8:]   # "filback_{region}"
+    branches = await get_all_branches()
+    filtered = [b for b in branches if _g(b, "viloyat") == region]
+
+    if not filtered:
+        await bot.send_message(
+            uid, "📍 <b>Filiallar</b>",
+            reply_markup=_branches_main_kb(), parse_mode="HTML",
+        )
+        return
+
+    await bot.send_message(
+        uid,
+        f"🏙 <b>{region}</b> — {len(filtered)} ta filial\n\nFilialni tanlang:",
+        reply_markup=_filials_kb(branches, region), parse_mode="HTML",
+    )
 
 
 # ── Eng yaqin filial ────────────────────────────────────────────
@@ -381,13 +418,11 @@ class FilialFSM(StatesGroup):
 async def cb_find_nearest(call: CallbackQuery, state: FSMContext):
     await state.set_state(FilialFSM.waiting_location)
     await call.answer()
-    try:
+    with contextlib.suppress(Exception):
         await call.message.edit_text(
             "📍 <b>Eng yaqin filialni topish</b>\n\nLokatsiyangizni yuboring:",
             parse_mode="HTML",
         )
-    except Exception:
-        pass
     await call.message.answer("Quyidagi tugmani bosing 👇", reply_markup=_location_kb())
 
 
@@ -408,15 +443,15 @@ async def process_location(message: Message, state: FSMContext):
     user_lng = message.location.longitude
     branches = await get_all_branches()
 
-    async def _with_dist(b: dict) -> dict | None:
+    async def _with_dist(idx: int, b: dict) -> dict | None:
         url    = _maps_url(b)
         coords = await resolve_coords(url) if url else None
         if not coords:
             return None
-        dist = _haversine(user_lat, user_lng, coords[0], coords[1])
-        return {**b, "_dist": dist}
+        return {**b, "_dist": _haversine(user_lat, user_lng, coords[0], coords[1]),
+                "_idx": idx}
 
-    results = await asyncio.gather(*[_with_dist(b) for b in branches])
+    results = await asyncio.gather(*[_with_dist(i, b) for i, b in enumerate(branches)])
     valid   = sorted([r for r in results if r], key=lambda x: x["_dist"])[:3]
 
     if not valid:
@@ -452,11 +487,12 @@ async def cmd_filiallar(message: Message, state: FSMContext):
 async def cmd_refresh(message: Message):
     if not _is_admin(message.from_user.id):
         return
-    global _gc, _coords_cache
+    global _gc, _coords_cache, _branches_cache
     _gc = None
     _coords_cache = {}
-    branches = await get_all_branches()
+    _branches_cache = None
+    branches = await get_all_branches(force=True)
     await message.answer(
-        f"✅ Yangilandi: <b>{len(branches)}</b> ta filial, koordinata cache tozalandi",
+        f"✅ Yangilandi: <b>{len(branches)}</b> ta filial",
         parse_mode="HTML",
     )

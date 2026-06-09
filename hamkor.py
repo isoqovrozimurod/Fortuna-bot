@@ -28,7 +28,7 @@ async def hamkor_info(callback: CallbackQuery, bot: Bot):
     # Eski xabarni o'chirish
     try:
         await callback.message.delete()
-    except Exception:
+    except:
         pass
     
     # Yangi rasm bilan xabar yuborish

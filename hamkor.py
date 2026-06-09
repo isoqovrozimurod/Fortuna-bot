@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent
 HAMKOR_BANNER = BASE_DIR / "temp" / "Hamkor_banner_v1.jpg"
 
 @router.callback_query(F.data == "hamkor")
-async def hamkor_info(callback: CallbackQuery):
+async def hamkor_info(callback: CallbackQuery, bot: Bot):
     """Hamkor krediti haqida ma'lumot"""
     await callback.answer()
     text = (

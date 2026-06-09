@@ -38,7 +38,7 @@ async def hamkor_info(callback: CallbackQuery, bot: Bot):
             photo=FSInputFile(HAMKOR_BANNER),
             caption=text,
             reply_markup=markup,
-            parse_mode=ParseMode.HTML
+            parse_mode="HTML"
         )
     else:
         # Agar rasm yo'q bo'lsa, faqat matn yuboradi
@@ -46,5 +46,5 @@ async def hamkor_info(callback: CallbackQuery, bot: Bot):
             chat_id=callback.from_user.id,
             text=text,
             reply_markup=markup,
-            parse_mode=ParseMode.HTML
+            parse_mode="HTML"
         )

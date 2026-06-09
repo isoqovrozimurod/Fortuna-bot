@@ -1,7 +1,6 @@
 from pathlib import Path
-from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile
-from aiogram.enums import ParseMode
+from aiogram import Router, Bot, F
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
 router = Router()
 

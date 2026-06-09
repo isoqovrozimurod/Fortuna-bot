@@ -10,7 +10,7 @@ from aiogram.types import (
 
 router = Router()
 
-TEMP_DIR = Path(__file__).resolve().parent / "temp"
+TEMP_DIR = Path(__file__).resolve().parent / "temp" / "ish_haqi"
 ISH_HAQI_IMG = TEMP_DIR / "ish_haqi_v1.png"
 
 ISH_HAQI_TEXT = (

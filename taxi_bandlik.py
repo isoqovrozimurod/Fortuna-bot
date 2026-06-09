@@ -41,7 +41,7 @@ async def taxi_bandlik_info(callback: CallbackQuery, bot: Bot):
 
     try:
         await callback.message.delete()
-    except Exception:
+    except:
         pass
 
     if BANNER.exists():
@@ -50,12 +50,12 @@ async def taxi_bandlik_info(callback: CallbackQuery, bot: Bot):
             photo=FSInputFile(BANNER),
             caption=text,
             reply_markup=markup,
-            parse_mode=ParseMode.HTML,
+            parse_mode="HTML",
         )
     else:
         await bot.send_message(
             chat_id=callback.from_user.id,
             text=text,
             reply_markup=markup,
-            parse_mode=ParseMode.HTML,
+            parse_mode="HTML",
         )

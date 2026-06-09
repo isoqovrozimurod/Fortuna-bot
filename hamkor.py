@@ -15,11 +15,10 @@ async def hamkor_info(callback: CallbackQuery):
     await callback.answer()
     text = (
         "🤝 <b>Hamkor krediti:</b>\n\n"
-        "- Tashkilotimizdan birinchi marta kredit olayotgan Budjet tashkilotlari xodimlari uchun\n"
-        "-dastlabki 30 kun foizsiz\n"
+        "- Tashkilotimizdan birinchi marta kredit olayotgan Budjet tashkilotlari xodimlari uchun dastlabki 30 kun foizsiz\n"
         "- Kredit muddati: 12 oy\n"
         "- Kredit summasi: 3 - 20 mln so'mgacha\n"
-        "📋 <b>Talab qilinadi: Pasport va ish haqi bank plastik kartasi\n"
+        "📋 <b>Talab qilinadi:</b> Pasport va ish haqi bank plastik kartasi\n"
     )
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_hamkor")],

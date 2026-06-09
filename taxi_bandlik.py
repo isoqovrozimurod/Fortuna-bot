@@ -11,7 +11,7 @@ from aiogram.enums import ParseMode
 router = Router()
 
 BASE_DIR = Path(__file__).resolve().parent
-BANNER   = BASE_DIR / "temp" / "banner_barchasi.jpg"
+BANNER   = BASE_DIR / "temp" / "taxi_bandlik" / "taxi_bandlik_v1.png"
 
 
 @router.callback_query(F.data == "taxi_bandlik")

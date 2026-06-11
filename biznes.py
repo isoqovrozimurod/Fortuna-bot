@@ -25,9 +25,10 @@ async def biznes_info(callback: CallbackQuery):
         "- Kafil asosida: 30 – 50 mln so‘mgacha\n\n"
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
         "  • Pasport\n"
-        "  • Plastik karta\n"
+        "  • Plastik karta yoki bank hisobraqamidagi aylanma ko'chirmasi\n"
         "  • STIR (INN)\n"
         "  • Biznes faoliyatini tasdiqlovchi hujjatlar"
+        "  • Ijara shartnomasi"
     )
 
     markup = InlineKeyboardMarkup(

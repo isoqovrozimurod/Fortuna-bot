@@ -27,8 +27,8 @@ async def biznes_info(callback: CallbackQuery):
         "  • Pasport\n"
         "  • Plastik karta yoki bank hisobraqamidagi aylanma ko'chirmasi\n"
         "  • STIR (INN)\n"
+        "  • Ijara shartnomasi\n"
         "  • Biznes faoliyatini tasdiqlovchi hujjatlar"
-        "  • Ijara shartnomasi"
     )
 
     markup = InlineKeyboardMarkup(

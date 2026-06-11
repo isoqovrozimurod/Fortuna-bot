@@ -7,11 +7,12 @@ from aiogram.types import (
 )
 from aiogram.enums import ParseMode
 import os
+import random
 
 router = Router()
 
-# Video joylashuvi
-VIDEO_PATH = os.path.join("temp", "biznes_uchun.mp4")
+# Media papkasi
+MEDIA_DIR = os.path.join("temp", "biznes_uchun")
 
 
 @router.callback_query(F.data == "biznes")
@@ -21,8 +22,8 @@ async def biznes_info(callback: CallbackQuery):
         "- Tadbirkorlik faoliyati bilan shug‘ullanuvchilar uchun\n"
         "- Kredit muddati: 12 – 24 oy\n"
         "- Kredit summasi: 10 – 50 mln so‘mgacha\n"
-        "- Kafil asosida: 30 – 50 mln so‘mgacha\n"
-        "- Talab qilinadi:\n"
+        "- Kafil asosida: 30 – 50 mln so‘mgacha\n\n"
+        "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
         "  • Pasport\n"
         "  • Plastik karta\n"
         "  • STIR (INN)\n"
@@ -31,29 +32,67 @@ async def biznes_info(callback: CallbackQuery):
 
     markup = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_biznes")],
-            [InlineKeyboardButton(text="⬅️ Ortga", callback_data="credit_types")]
+            [
+                InlineKeyboardButton(
+                    text="📊 Kredit hisoblash",
+                    callback_data="calc_biznes"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Ortga",
+                    callback_data="credit_types"
+                )
+            ]
         ]
     )
 
-    # Video mavjudligini tekshirish (Railway uchun muhim)
-    if not os.path.exists(VIDEO_PATH):
+    # Papkadagi media fayllarni olish
+    media_files = [
+        os.path.join(MEDIA_DIR, file)
+        for file in os.listdir(MEDIA_DIR)
+        if file.lower().endswith(
+            (".mp4", ".png", ".jpg", ".jpeg")
+        )
+    ]
+
+    if not media_files:
         await callback.message.answer(
-            "❌ Video topilmadi. Iltimos, administrator bilan bog‘laning."
+            "❌ Media fayllar topilmadi."
         )
         return
 
-    video = FSInputFile(VIDEO_PATH)
+    # Random fayl tanlash
+    selected_file = random.choice(media_files)
 
-    await callback.message.answer_video(
-        video=video,
-        caption=text,
-        reply_markup=markup,
-        parse_mode=ParseMode.HTML
-    )
+    media = FSInputFile(selected_file)
 
-    # Eski xabarni o‘chiramiz
     try:
-        await callback.message.delete()
-    except:
-        pass
+        # Video bo'lsa
+        if selected_file.lower().endswith(".mp4"):
+            await callback.message.answer_video(
+                video=media,
+                caption=text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+
+        # Rasm bo'lsa
+        else:
+            await callback.message.answer_photo(
+                photo=media,
+                caption=text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+
+        # Eski xabarni o'chirish
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+    except Exception as e:
+        await callback.message.answer(
+            f"❌ Media yuborishda xatolik:\n{e}"
+        )

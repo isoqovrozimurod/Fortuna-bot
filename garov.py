@@ -12,12 +12,13 @@ async def garov_info(callback: CallbackQuery):
         "🚗 <b>Avtomashina garov asosida kredit:</b>\n\n"
         "- 2000-yildan yuqori mashinalar garovga olinadi\n"
         "- So'ngi 5 yilda ishlab chiqarilgan Avtomashinalar uchun hozirgi foiz stavkasidan 6% chegirma mavjud\n"
-        "- Garov mashina egasining nomida bo‘lishi shart\n"
-        "  (yoki ishonchnomada sotish va garovga qo'yish huquqi bo‘lishi kerak)\n"
+        "- Garov mashina egasining nomida bo‘lishi shart (yoki ishonchnomada sotish va garovga qo'yish huquqi bo‘lishi kerak)\n"
         "- Kredit muddati: 12 – 36 oy\n"
-        "- Kredit summasi: 3 – 300 mln so'mgacha\n"
-        "- Hujjatlar: pasport (turmush o'rtog'i pasporti va garovga qo'yishga roziligi haqida ariza),\n"
-        "  nikoh guvohnomasi, texpasport, avtomobil"
+        "- Kredit summasi: 3 – 300 mln so'mgacha\n\n"
+        "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
+        "• Pasport (turmush o'rtog'ining garovga qo'yishga roziligi haqida ariza),\n"
+        "• Texpasport\n" 
+        "• Avtomobil"
     )
 
     markup = InlineKeyboardMarkup(inline_keyboard=[
@@ -26,7 +27,7 @@ async def garov_info(callback: CallbackQuery):
     ])
 
     # Fayl manzilini aniq ko‘rsatamiz
-    photo_path = Path(__file__).resolve().parent / "temp" / "fortuna_rek.jpg"
+    photo_path = Path(__file__).resolve().parent / "temp" / "avto_garov" / "garov_banner_v2.png"
 
     if photo_path.is_file():
         photo = FSInputFile(photo_path)

@@ -12,7 +12,7 @@ from aiogram.types import (
 router = Router()
 
 BASE_DIR = Path(__file__).resolve().parent
-BANNER = BASE_DIR / "temp" / "banner_barchasi.jpg"
+BANNER = BASE_DIR / "temp" / "full_banner" / "banner_barchasi.jpg"
 
 
 def kredit_turlari_kb():

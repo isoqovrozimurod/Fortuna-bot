@@ -506,12 +506,16 @@ async def _send_long(bot: Bot, chat_id: int, text: str) -> None:
 
 # ===================== STATISTIKA (umumiy) =====================
 
+# YANGI — bitta o'qish
 def _stats_sync(days: int) -> list[dict]:
-    sheet       = _ws()
-    headers     = sheet.row_values(1)
-    data        = _safe_records(sheet)
-    cutoff      = (now_tz() - timedelta(days=days - 1)).replace(
-                    hour=0, minute=0, second=0, microsecond=0)
+    sheet    = _ws()
+    all_vals = sheet.get_all_values()   # bitta o'qish
+    if len(all_vals) < 2:
+        return []
+    headers = [str(h).strip() for h in all_vals[0]]
+
+    cutoff = (now_tz() - timedelta(days=days - 1)).replace(
+                hour=0, minute=0, second=0, microsecond=0)
     valid_dates = []
     for h in headers[BASE_COLS:]:
         try:
@@ -520,17 +524,37 @@ def _stats_sync(days: int) -> list[dict]:
                 valid_dates.append(h)
         except ValueError:
             pass
-    result = []
-    for r in data:
-        if str(r.get("Holati", "")).strip() == "Chiqib ketdi":
+
+    today_s = today_str()
+    result  = []
+    for row in all_vals[1:]:
+        if not any(str(c).strip() for c in row[:8]):
             continue
-        tg_id = str(r.get("Telegram ID", "")).strip()
+        padded = row + [""] * max(0, len(headers) - len(row))
+        rec    = {headers[i]: padded[i] for i in range(len(headers)) if headers[i]}
+
+        if str(rec.get("Holati", "")).strip() == "Chiqib ketdi":
+            continue
+        tg_id = str(rec.get("Telegram ID", "")).strip()
         if not tg_id:
             continue
-        name  = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
-        total = sum(int(r[d]) if str(r.get(d, 0)).strip().isdigit() else 0
-                    for d in valid_dates)
+        name  = f"{rec.get('Ism', '')} {rec.get('Familiya', '')}".strip() or "Noma'lum"
+
+        total = 0
+        for d in valid_dates:
+            v          = rec.get(d, "")
+            from_sheet = int(v) if str(v).strip().isdigit() else 0
+            if d == today_s:
+                try:
+                    from_local = _local_get(int(tg_id))
+                    if from_local > from_sheet:
+                        from_sheet = from_local
+                except (ValueError, TypeError):
+                    pass
+            total += from_sheet
+
         result.append({"id": tg_id, "name": name, "total": total})
+
     result.sort(key=lambda x: x["total"], reverse=True)
     return result
 

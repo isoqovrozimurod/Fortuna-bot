@@ -6,7 +6,7 @@ router = Router()
 
 # 📂 Banner yo'li
 BASE_DIR = Path(__file__).resolve().parent
-HAMKOR_BANNER = BASE_DIR / "temp" / "hamkor" / "hamkor_banner_v1.jpg"
+HAMKOR_BANNER = BASE_DIR / "temp" / "hamkor" / "hamkor_v2.png"
 
 @router.callback_query(F.data == "hamkor")
 async def hamkor_info(callback: CallbackQuery, bot: Bot):

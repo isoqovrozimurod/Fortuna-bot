@@ -4,9 +4,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 router = Router()
 
-# 📂 Banner yo'li
-BASE_DIR = Path(__file__).resolve().parent
-HAMKOR_BANNER = BASE_DIR / "temp" / "hamkor" / "hamkor_v2.png"
+# Media papkasi
+MEDIA_DIR = os.path.join("temp", "hamkor")
 
 @router.callback_query(F.data == "hamkor")
 async def hamkor_info(callback: CallbackQuery, bot: Bot):
@@ -31,20 +30,39 @@ async def hamkor_info(callback: CallbackQuery, bot: Bot):
     except:
         pass
     
-    # Yangi rasm bilan xabar yuborish
-    if HAMKOR_BANNER.exists():
-        await bot.send_photo(
-            chat_id=callback.from_user.id,
-            photo=FSInputFile(HAMKOR_BANNER),
-            caption=text,
-            reply_markup=markup,
-            parse_mode="HTML"
+    # Papkadagi media fayllarni olish
+    media_files = [
+        os.path.join(MEDIA_DIR, file)
+        for file in os.listdir(MEDIA_DIR)
+        if file.lower().endswith(
+            (".mp4", ".png", ".jpg", ".jpeg")
         )
-    else:
-        # Agar rasm yo'q bo'lsa, faqat matn yuboradi
-        await bot.send_message(
-            chat_id=callback.from_user.id,
-            text=text,
-            reply_markup=markup,
-            parse_mode="HTML"
+    ]
+
+    if not media_files:
+        await callback.message.answer(
+            "❌ Media fayllar topilmadi."
         )
+        return
+
+    # Random fayl tanlash
+    selected_file = random.choice(media_files)
+    media = FSInputFile(selected_file)
+    try:
+        # Video bo'lsa
+        if selected_file.lower().endswith(".mp4"):
+            await callback.message.answer_video(
+                video=media,
+                caption=text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+
+        # Rasm bo'lsa
+        else:
+            await callback.message.answer_photo(
+                photo=media,
+                caption=text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )

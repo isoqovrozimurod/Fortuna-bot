@@ -1,9 +1,13 @@
-from pathlib import Path
+from aiogram import Router, F
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    FSInputFile
+)
+from aiogram.enums import ParseMode
 import os
 import random
-from aiogram.enums import ParseMode
-from aiogram import Router, Bot, F
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
 router = Router()
 
@@ -27,12 +31,6 @@ async def hamkor_info(callback: CallbackQuery, bot: Bot):
         [InlineKeyboardButton(text="⬅️ Ortga", callback_data="credit_types")]
     ])
     
-    # Eski xabarni o'chirish
-    try:
-        await callback.message.delete()
-    except:
-        pass
-    
     # Papkadagi media fayllarni olish
     media_files = [
         os.path.join(MEDIA_DIR, file)
@@ -50,27 +48,35 @@ async def hamkor_info(callback: CallbackQuery, bot: Bot):
 
     # Random fayl tanlash
     selected_file = random.choice(media_files)
+
     media = FSInputFile(selected_file)
+
     try:
-    # Video bo'lsa
-    if selected_file.lower().endswith(".mp4"):
-        await callback.message.answer_video(
-            video=media,
-            caption=text,
-            reply_markup=markup,
-            parse_mode=ParseMode.HTML
-        )
+        # Video bo'lsa
+        if selected_file.lower().endswith(".mp4"):
+            await callback.message.answer_video(
+                video=media,
+                caption=text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
 
-    # Rasm bo'lsa
-    else:
-        await callback.message.answer_photo(
-            photo=media,
-            caption=text,
-            reply_markup=markup,
-            parse_mode=ParseMode.HTML
-        )
+        # Rasm bo'lsa
+        else:
+            await callback.message.answer_photo(
+                photo=media,
+                caption=text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
 
-except Exception as e:
-    await callback.message.answer(
-        f"❌ Media yuborishda xatolik: {e}"
-    )
+        # Eski xabarni o'chirish
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+    except Exception as e:
+        await callback.message.answer(
+            f"❌ Media yuborishda xatolik:\n{e}"
+        )

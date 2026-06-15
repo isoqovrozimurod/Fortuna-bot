@@ -14,10 +14,9 @@ router = Router()
 # Media papkasi
 MEDIA_DIR = os.path.join("temp", "hamkor")
 
+
 @router.callback_query(F.data == "hamkor")
-async def hamkor_info(callback: CallbackQuery, bot: Bot):
-    """Hamkor krediti haqida ma'lumot"""
-    await callback.answer()
+async def biznes_info(callback: CallbackQuery):
     text = (
         "🤝 <b>Hamkor krediti:</b>\n\n"
         "- Tashkilotimizdan birinchi marta kredit olayotgan Budjet tashkilotlari xodimlari uchun\n"
@@ -26,10 +25,12 @@ async def hamkor_info(callback: CallbackQuery, bot: Bot):
         "- Kredit summasi: 3 - 20 mln so'mgacha\n"
         "📋 <b>Talab qilinadi:</b> Pasport va ish haqi bank plastik kartasi\n"
     )
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_hamkor")],
-        [InlineKeyboardButton(text="⬅️ Ortga", callback_data="credit_types")]
-    ])
+
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_hamkor")],
+            [InlineKeyboardButton(text="⬅️ Ortga", callback_data="credit_types")]
+        ])
     
     # Papkadagi media fayllarni olish
     media_files = [

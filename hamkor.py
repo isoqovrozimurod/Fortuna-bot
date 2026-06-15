@@ -14,7 +14,8 @@ async def hamkor_info(callback: CallbackQuery, bot: Bot):
     await callback.answer()
     text = (
         "🤝 <b>Hamkor krediti:</b>\n\n"
-        "- Tashkilotimizdan birinchi marta kredit olayotgan Budjet tashkilotlari xodimlari uchun dastlabki 30 kun foizsiz\n"
+        "- Tashkilotimizdan birinchi marta kredit olayotgan Budjet tashkilotlari xodimlari uchun\n"
+        "- Dastlabki 30 kun foizsiz"
         "- Kredit muddati: 12 oy\n"
         "- Kredit summasi: 3 - 20 mln so'mgacha\n"
         "📋 <b>Talab qilinadi:</b> Pasport va ish haqi bank plastik kartasi\n"

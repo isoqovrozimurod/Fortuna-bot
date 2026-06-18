@@ -1,10 +1,13 @@
-from aiogram import Router, F
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.types import FSInputFile
+from aiogram import Router, F, Bot
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile
 from aiogram.enums import ParseMode
-from pathlib import Path
+import os
+import random
 
 router = Router()
+
+# Media papkasi
+MEDIA_DIR = os.path.join("temp", "avto_garov")
 
 @router.callback_query(F.data == "garov")
 async def garov_info(callback: CallbackQuery):
@@ -26,16 +29,50 @@ async def garov_info(callback: CallbackQuery):
         [InlineKeyboardButton(text="⬅️ Ortga", callback_data="credit_types")]
     ])
 
-    # Fayl manzilini aniq ko‘rsatamiz
-    photo_path = Path(__file__).resolve().parent / "temp" / "avto_garov" / "garov_banner_v2.png"
-
-    if photo_path.is_file():
-        photo = FSInputFile(photo_path)
-        await callback.message.answer_photo(
-            photo=photo,
-            caption=text,
-            reply_markup=markup,
-            parse_mode=ParseMode.HTML
+    # Papkadagi media fayllarni olish
+    media_files = [
+        os.path.join(MEDIA_DIR, file)
+        for file in os.listdir(MEDIA_DIR)
+        if file.lower().endswith(
+            (".mp4", ".png", ".jpg", ".jpeg")
         )
-    else:
-        await callback.message.answer("🖼 Rasm topilmadi.", reply_markup=markup)
+    ]
+
+    if not os.path.exists(MEDIA_DIR):
+        await callback.answer()
+        await callback.message.answer("❌ Media papka topilmadi.")
+        return
+
+    # Random fayl tanlash
+    selected_file = random.choice(media_files)
+    media = FSInputFile(selected_file)
+
+    try:
+        # Video bo'lsa
+        if selected_file.lower().endswith(".mp4"):
+            await callback.message.answer_video(
+                video=media,
+                caption=text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+
+        # Rasm bo'lsa
+        else:
+            await callback.message.answer_photo(
+                photo=media,
+                caption=text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+
+        # Eski xabarni o'chirish
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+    except Exception as e:
+        await callback.message.answer(
+            f"❌ Media yuborishda xatolik:\n{e}"
+        )

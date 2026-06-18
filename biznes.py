@@ -40,10 +40,9 @@ async def biznes_info(callback: CallbackQuery, bot: Bot):
         )
     ]
 
-    if not media_files:
-        await callback.message.answer(
-            "❌ Media fayllar topilmadi."
-        )
+    if not os.path.exists(MEDIA_DIR):
+        await callback.answer()
+        await callback.message.answer("❌ Media papka topilmadi.")
         return
 
     # Random fayl tanlash

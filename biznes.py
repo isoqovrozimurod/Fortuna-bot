@@ -20,7 +20,7 @@ async def biznes_info(callback: CallbackQuery):
         "- Kafil asosida: 30 – 50 mln so‘mgacha\n\n"
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
         "  • Pasport\n"
-        "  • Plastik karta yoki bank hisobraqamidagi aylanma ko'chirmasi\n"
+        "  • Plastik karta yoki bank hisobraqami aylanmasidan ko'chirma\n"
         "  • STIR (INN)\n"
         "  • Ijara shartnomasi\n"
         "  • Biznes faoliyatini tasdiqlovchi hujjatlar"

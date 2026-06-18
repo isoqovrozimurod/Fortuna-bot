@@ -1,4 +1,4 @@
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile
 from aiogram.enums import ParseMode
 import os
@@ -11,7 +11,7 @@ MEDIA_DIR = os.path.join("temp", "hamkor")
 
 
 @router.callback_query(F.data == "hamkor")
-async def biznes_info(callback: CallbackQuery):
+async def biznes_info(callback: CallbackQuery, bot: Bot):
     text = (
         "🤝 <b>Hamkor krediti:</b>\n\n"
         "- Tashkilotimizdan birinchi marta kredit olayotgan Budjet tashkilotlari xodimlari uchun\n"
@@ -38,15 +38,13 @@ async def biznes_info(callback: CallbackQuery):
         )
     ]
 
-    if not media_files:
-        await callback.message.answer(
-            "❌ Media fayllar topilmadi."
-        )
+    if not os.path.exists(MEDIA_DIR):
+        await callback.answer()
+        await callback.message.answer("❌ Media papka topilmadi.")
         return
 
     # Random fayl tanlash
     selected_file = random.choice(media_files)
-
     media = FSInputFile(selected_file)
 
     try:

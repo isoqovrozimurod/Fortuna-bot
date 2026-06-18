@@ -1,23 +1,16 @@
-from pathlib import Path
 from aiogram import Router, F, Bot
-from aiogram.types import (
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    FSInputFile,
-)
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile
 from aiogram.enums import ParseMode
+import os
+import random
 
 router = Router()
 
-BASE_DIR = Path(__file__).resolve().parent
-BANNER   = BASE_DIR / "temp" / "avto_drive" / "avto_drive_v2.png"
-
+# Media papkasi
+MEDIA_DIR = os.path.join("temp", "avto_drive")
 
 @router.callback_query(F.data == "avto_drive")
 async def avto_drive_info(callback: CallbackQuery, bot: Bot):
-    await callback.answer()
-
     text = (
         "🚘 <b>Avto-Drive mikroqarzi:</b>\n\n"
         "– Shaxsiy avtomobilga ega jismoniy shaxslarga\n"
@@ -29,30 +22,55 @@ async def avto_drive_info(callback: CallbackQuery, bot: Bot):
         "3. Sug'urta polisi\n"
     )
 
-    markup = InlineKeyboardMarkup(
-        inline_keyboard=[
+    markup = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_avto_drive")],
             [InlineKeyboardButton(text="⬅️ Ortga",            callback_data="credit_types")],
-        ]
-    )
+        ])
+
+    # Papkadagi media fayllarni olish
+    media_files = [
+        os.path.join(MEDIA_DIR, file)
+        for file in os.listdir(MEDIA_DIR)
+        if file.lower().endswith(
+            (".mp4", ".png", ".jpg", ".jpeg")
+        )
+    ]
+
+    if not os.path.exists(MEDIA_DIR):
+        await callback.answer()
+        await callback.message.answer("❌ Media papka topilmadi.")
+        return
+
+    # Random fayl tanlash
+    selected_file = random.choice(media_files)
+    media = FSInputFile(selected_file)
 
     try:
-        await callback.message.delete()
-    except Exception:
-        pass
+        # Video bo'lsa
+        if selected_file.lower().endswith(".mp4"):
+            await callback.message.answer_video(
+                video=media,
+                caption=text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
 
-    if BANNER.exists():
-        await bot.send_photo(
-            chat_id=callback.from_user.id,
-            photo=FSInputFile(BANNER),
-            caption=text,
-            reply_markup=markup,
-            parse_mode=ParseMode.HTML,
-        )
-    else:
-        await bot.send_message(
-            chat_id=callback.from_user.id,
-            text=text,
-            reply_markup=markup,
-            parse_mode=ParseMode.HTML,
+        # Rasm bo'lsa
+        else:
+            await callback.message.answer_photo(
+                photo=media,
+                caption=text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+
+        # Eski xabarni o'chirish
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+    except Exception as e:
+        await callback.message.answer(
+            f"❌ Media yuborishda xatolik:\n{e}"
         )

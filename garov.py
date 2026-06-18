@@ -10,7 +10,7 @@ router = Router()
 MEDIA_DIR = os.path.join("temp", "avto_garov")
 
 @router.callback_query(F.data == "garov")
-async def garov_info(callback: CallbackQuery):
+async def garov_info(callback: CallbackQuery, bot: Bot):
     text = (
         "🚗 <b>Avtomashina garov asosida kredit:</b>\n\n"
         "- 2000-yildan yuqori mashinalar garovga olinadi\n"

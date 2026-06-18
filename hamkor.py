@@ -1,10 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import (
-    CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    FSInputFile
-)
+from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile
 from aiogram.enums import ParseMode
 import os
 import random
@@ -22,8 +17,10 @@ async def biznes_info(callback: CallbackQuery):
         "- Tashkilotimizdan birinchi marta kredit olayotgan Budjet tashkilotlari xodimlari uchun\n"
         "- Dastlabki 30 kun foizsiz"
         "- Kredit muddati: 12 oy\n"
-        "- Kredit summasi: 3 - 20 mln so'mgacha\n"
-        "📋 <b>Talab qilinadi:</b> Pasport va ish haqi bank plastik kartasi\n"
+        "- Kredit summasi: 3 - 20 mln so'mgacha\n\n"
+        "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
+        "  • Pasport\n"
+        "  • Ish haqi plastik kartasi\n"
     )
 
     markup = InlineKeyboardMarkup(

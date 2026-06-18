@@ -11,7 +11,7 @@ MEDIA_DIR = os.path.join("temp", "biznes_uchun")
 
 
 @router.callback_query(F.data == "biznes")
-async def biznes_info(callback: CallbackQuery):
+async def biznes_info(callback: CallbackQuery, bot: Bot):
     text = (
         "🏢 <b>Biznes uchun mikroqarz:</b>\n\n"
         "- Tadbirkorlik faoliyati bilan shug‘ullanuvchilar uchun\n"

@@ -1,10 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import (
-    CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    FSInputFile
-)
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile
 from aiogram.enums import ParseMode
 import os
 import random
@@ -31,22 +26,10 @@ async def biznes_info(callback: CallbackQuery):
         "  • Biznes faoliyatini tasdiqlovchi hujjatlar"
     )
 
-    markup = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📊 Kredit hisoblash",
-                    callback_data="calc_biznes"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="⬅️ Ortga",
-                    callback_data="credit_types"
-                )
-            ]
-        ]
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_biznes")],
+            [InlineKeyboardButton(text="⬅️ Ortga", callback_data="credit_types")]
+        ])
 
     # Papkadagi media fayllarni olish
     media_files = [

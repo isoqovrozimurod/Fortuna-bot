@@ -32,6 +32,7 @@ from kredit import router as kredit_admin_router
 from hamkor import router as hamkor_router
 from avto_drive import router as avto_drive_router
 from taxi_bandlik import router as taxi_bandlik_router
+from oila import router as oila_router
 from filial import router as filial_router
 from reklama_nazorati import router as reklama_router
 from broadcast import router as broadcast_router
@@ -114,6 +115,7 @@ def setup_dispatcher() -> Dispatcher:
     dp.include_router(hamkor_router)
     dp.include_router(avto_drive_router)
     dp.include_router(taxi_bandlik_router)
+    dp.include_router(oila_router)
     dp.include_router(calc_router)
     dp.include_router(valyuta_router)
     dp.include_router(vakansiya_router)

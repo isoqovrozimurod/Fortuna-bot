@@ -102,7 +102,6 @@ BACK_KB = InlineKeyboardMarkup(
 
 fmt = lambda n: f"{round(n):,}".replace(",", " ")
 
-
 # ── Jadval hisoblash ───────────────────────────────────────────
 
 def ann_table(pr: float, rate: float, m: int, grace_days: int = 0) -> List[List]:

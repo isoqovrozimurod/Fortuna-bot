@@ -24,9 +24,9 @@ async def oila_info(callback: CallbackQuery, bot: Bot):
         "  • Boshqa zarur hujjatlar kredit mutaxassisi tomonidan ma'lum qilinadi.\n"
     )
 
-markup = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_oila")],
-    [InlineKeyboardButton(text="⬅️ Ortga",            callback_data="credit_types")],
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_oila")],
+        [InlineKeyboardButton(text="⬅️ Ortga",            callback_data="credit_types")],
 ])
 
 

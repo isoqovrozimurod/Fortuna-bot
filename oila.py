@@ -11,7 +11,6 @@ MEDIA_DIR = os.path.join("temp", "hamkor")
 
 @router.callback_query(F.data == "oila")
 async def oila_info(callback: CallbackQuery, bot: Bot):
-    await callback.answer()
 text = (
     "🏠 <b>Oila mikroqarzi:</b>\n\n"
     "– Chet elda ishlovchi jismoniy shaxs o'zi yoki yaqin qarindoshlariga (ota-ona yoki turmush o'rtog'i) ajratiladi\n"

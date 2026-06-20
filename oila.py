@@ -7,7 +7,7 @@ import random
 router = Router()
 
 # Media papkasi
-MEDIA_DIR = os.path.join("temp", "hamkor")
+MEDIA_DIR = os.path.join("temp", "oila")
 
 @router.callback_query(F.data == "oila")
 async def oila_info(callback: CallbackQuery, bot: Bot):

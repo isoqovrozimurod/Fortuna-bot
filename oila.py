@@ -11,18 +11,18 @@ MEDIA_DIR = os.path.join("temp", "hamkor")
 
 @router.callback_query(F.data == "oila")
 async def oila_info(callback: CallbackQuery, bot: Bot):
-text = (
-    "🏠 <b>Oila mikroqarzi:</b>\n\n"
-    "– Chet elda ishlovchi jismoniy shaxs o'zi yoki yaqin qarindoshlariga (ota-ona yoki turmush o'rtog'i) ajratiladi\n"
-    "- Kredit summasi: 10 mln so'mgacha\n"
-    "- Muddati: 12 oy\n\n"
-    "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
-    "  • O'zi yoki yaqin qarindoshining chet elda ishlashini asoslovchi hujjatlar\n"
-    "  • Qarindoshlikni tasdiqlovchi hujjatlar(Nikoh guvohnomasi yoki my.gov.uz platformasidagi hujjatlar)\n"
-    "  • Karta aylanmalari yoki xalqaro pul o'tkazmalari cheklari\n"
-    "  • Patent (chet elda ishlovchi bo'lsa)\n"
-    "  • Boshqa zarur hujjatlar kredit mutaxassisi tomonidan ma'lum qilinadi.\n"
-  )
+    text = (
+        "🏠 <b>Oila mikroqarzi:</b>\n\n"
+        "– Chet elda ishlovchi jismoniy shaxs o'zi yoki yaqin qarindoshlariga (ota-ona yoki turmush o'rtog'i) ajratiladi\n"
+        "- Kredit summasi: 10 mln so'mgacha\n"
+        "- Muddati: 12 oy\n\n"
+        "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
+        "  • O'zi yoki yaqin qarindoshining chet elda ishlashini asoslovchi hujjatlar\n"
+        "  • Qarindoshlikni tasdiqlovchi hujjatlar(Nikoh guvohnomasi yoki my.gov.uz platformasidagi hujjatlar)\n"
+        "  • Karta aylanmalari yoki xalqaro pul o'tkazmalari cheklari\n"
+        "  • Patent (chet elda ishlovchi bo'lsa)\n"
+        "  • Boshqa zarur hujjatlar kredit mutaxassisi tomonidan ma'lum qilinadi.\n"
+    )
 
 markup = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_oila")],

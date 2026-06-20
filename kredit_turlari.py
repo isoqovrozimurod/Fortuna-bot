@@ -1,13 +1,7 @@
 from pathlib import Path
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
-from aiogram.types import (
-    Message,
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    FSInputFile
-)
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
 router = Router()
 
@@ -25,10 +19,10 @@ def kredit_turlari_kb():
             [InlineKeyboardButton(text="🤝 Hamkor",            callback_data="hamkor")],
             [InlineKeyboardButton(text="🚘 Avto-Drive",        callback_data="avto_drive")],
             [InlineKeyboardButton(text="🚖 Taxi-Bandlik",      callback_data="taxi_bandlik")],
+            [InlineKeyboardButton(text="🏠 Oila mikroqarzi",   callback_data="oila")],
             [InlineKeyboardButton(text="⬅️ Ortga",             callback_data="back_to_menu")],
         ]
     )
-
 
 def kredit_text():
     return (
@@ -40,6 +34,7 @@ def kredit_text():
         "🤝 Budjet tashkiloti xodimlari (Hamkor)\n"
         "🚘 Avto-Drive (avtomobil egalariga kichik mikroqarz)\n"
         "🚖 Taxi-Bandlik (taksi haydovchilari)"
+        "🏠 Oila mikroqarzi (Migrantlar uchun)"
     )
 
 

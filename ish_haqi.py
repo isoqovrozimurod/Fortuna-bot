@@ -1,56 +1,79 @@
-from pathlib import Path
-
-from aiogram import F, Router
-from aiogram.types import (
-    CallbackQuery,
-    FSInputFile,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from aiogram import Router, F, Bot
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile
+from aiogram.enums import ParseMode
+import os
+import random
 
 router = Router()
 
-TEMP_DIR = Path(__file__).resolve().parent / "temp" / "ish_haqi"
-ISH_HAQI_IMG = TEMP_DIR / "ish_haqi_v1.png"
+# Media papkasi
+MEDIA_DIR = os.path.join("temp", "ish_haqi")
 
-ISH_HAQI_TEXT = (
+@router.callback_query(F.data == "ish_haqi")
+async def show_pensiya_info(callback: CallbackQuery, bot: Bot):
+    text = (
     "💼 <b>Ish haqi asosida kredit:</b>\n\n"
     "• Rasmiy daromadga ega shaxslarga\n"
     "• Kredit muddati: 12 – 36 oy\n"
     "• Kredit summasi: 3 – 40 mln so'mgacha\n"
-    "• Kafil asosida: 20 – 40 mln so'mgacha\n"
-    "• Talab qilinadi: pasport, ish haqi plastik kartasi\n"
-    "  (harbiylar uchun ish joyidan ish haqi ma'lumotnomasi)"
+    "• Kafil asosida: 20 – 40 mln so'mgacha\n\n"
+    "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
+        "  • Pasport\n"
+        "  • Ish haqi plastik kartasi\n"
+        "  • <i>(Harbiylar uchun ish joyidan ish haqi ma'lumotnomasi)</i>\n"
 )
 
-ISH_HAQI_MARKUP = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_salary")],
-    [InlineKeyboardButton(text="⬅️ Ortga",            callback_data="credit_types")],
-])
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_salary")],
+        [InlineKeyboardButton(text="⬅️ Ortga", callback_data="credit_types")],
+    ])
 
 
-@router.callback_query(F.data == "ish_haqi")
-async def ish_haqi_info(callback: CallbackQuery):
-    await callback.answer()
-
-    # Avvalgi xabarni o'chiramiz
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
-
-    # ish_haqi_v1.png rasm bilan yangi xabar yuboramiz
-    if ISH_HAQI_IMG.exists():
-        await callback.message.answer_photo(
-            photo=FSInputFile(str(ISH_HAQI_IMG)),
-            caption=ISH_HAQI_TEXT,
-            reply_markup=ISH_HAQI_MARKUP,
-            parse_mode="HTML",
+# Papkadagi media fayllarni olish
+    media_files = [
+        os.path.join(MEDIA_DIR, file)
+        for file in os.listdir(MEDIA_DIR)
+        if file.lower().endswith(
+            (".mp4", ".png", ".jpg", ".jpeg")
         )
-    else:
-        # Rasm yo'q bo'lsa — faqat matn
+    ]
+
+    if not os.path.exists(MEDIA_DIR):
+        await callback.answer()
+        await callback.message.answer("❌ Media papka topilmadi.")
+        return
+
+    # Random fayl tanlash
+    selected_file = random.choice(media_files)
+
+    media = FSInputFile(selected_file)
+
+    try:
+        # Video bo'lsa
+        if selected_file.lower().endswith(".mp4"):
+            await callback.message.answer_video(
+                video=media,
+                caption=text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+
+        # Rasm bo'lsa
+        else:
+            await callback.message.answer_photo(
+                photo=media,
+                caption=text,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+
+        # Eski xabarni o'chirish
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+    except Exception as e:
         await callback.message.answer(
-            text=ISH_HAQI_TEXT,
-            reply_markup=ISH_HAQI_MARKUP,
-            parse_mode="HTML",
+            f"❌ Media yuborishda xatolik:\n{e}"
         )

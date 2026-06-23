@@ -33,7 +33,7 @@ def kredit_text():
         "🏢 Biznes egalari\n"
         "🤝 Budjet tashkiloti xodimlari (Hamkor)\n"
         "🚘 Avto-Drive (avtomobil egalariga kichik mikroqarz)\n"
-        "🚖 Taxi-Bandlik (taksi haydovchilari)"
+        "🚖 Taxi-Bandlik (taksi haydovchilari)\n"
         "🏠 Oila mikroqarzi (Migrantlar uchun)"
     )
 

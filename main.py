@@ -34,7 +34,7 @@ from avto_drive import router as avto_drive_router
 from taxi_bandlik import router as taxi_bandlik_router
 from oila import router as oila_router
 from filial import router as filial_router
-from reklama_nazorati import router as reklama_router
+from reklama_nazorati import router as reklama_router, setup_scheduler
 from broadcast import router as broadcast_router
 from download import router as download_router
 from scoring import router as scoring_router

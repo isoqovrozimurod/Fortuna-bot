@@ -16,14 +16,14 @@ async def biznes_info(callback: CallbackQuery, bot: Bot):
         "🏢 <b>Biznes uchun mikroqarz:</b>\n\n"
         "- Tadbirkorlik faoliyati bilan shug‘ullanuvchilar uchun\n"
         "- Kredit muddati: 12 – 24 oy\n"
-        "- Kredit summasi: 10 – 50 mln so‘mgacha\n"
-        "- Kafil asosida: 30 – 50 mln so‘mgacha\n\n"
+        "- Kredit summasi: 30 mln so‘mgacha\n"
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
         "  • Pasport\n"
         "  • Plastik karta yoki bank hisobraqami aylanmasidan ko'chirma\n"
         "  • STIR (INN)\n"
         "  • Ijara shartnomasi\n"
-        "  • Biznes faoliyatini tasdiqlovchi hujjatlar"
+        "  • Biznes faoliyatini tasdiqlovchi hujjatlar\n"
+        "  • Kafil talab qilinadi"
     )
 
     markup = InlineKeyboardMarkup(inline_keyboard=[

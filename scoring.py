@@ -100,7 +100,7 @@ def get_limit(kredit_turi: str, kredit_summasi: float, ish_joyi: str = "") -> fl
 LIMIT_TEXT = {
     "pensiya": (
         "📌 <b>Pensiya krediti — qarz yuki chegarasi:</b>\n"
-        "• Qarz yuki <b>50%</b> dan oshmasligi kerak\n"
+        "• Qarz yuki <b>75%</b> dan oshmasligi kerak(qo'shimcha daromad qo'shilgan holda)\n"
         "• Oylik daromad sifatida oxirgi pensiya summasi kiritiladi"
     ),
     "ish_haqi": (

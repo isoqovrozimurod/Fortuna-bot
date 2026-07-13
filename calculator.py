@@ -73,7 +73,7 @@ CFG = {
     },
     "calc_biznes": {
         "name": "Biznes uchun mikroqarz", "rate": 54,
-        "min": 10_000_000, "max": 50_000_000, "mmin": 12, "mmax": 24,
+        "min": 10_000_000, "max": 30_000_000, "mmin": 12, "mmax": 24,
     },
     "calc_hamkor": {
         "name": "Hamkor krediti", "rate": 56,
@@ -82,11 +82,11 @@ CFG = {
     },
     "calc_avto_drive": {
         "name": "Avto-Drive mikroqarzi", "rate": 59,
-        "min": 3_000_000, "max": 5_000_000, "mmin": 12, "mmax": 12,
+        "min": 3_000_000, "max": 10_000_000, "mmin": 12, "mmax": 12,
     },
     "calc_taxi_bandlik": {
         "name": "Taxi-Bandlik mikroqarzi", "rate": 56,
-        "min": 3_000_000, "max": 10_000_000, "mmin": 12, "mmax": 12,
+        "min": 3_000_000, "max": 15_000_000, "mmin": 12, "mmax": 12,
     },
     "calc_oila": {
         "name": "Oila mikroqarzi", "rate": 56,

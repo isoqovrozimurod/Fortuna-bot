@@ -14,7 +14,7 @@ async def avto_drive_info(callback: CallbackQuery, bot: Bot):
     text = (
         "🚘 <b>Avto-Drive mikroqarzi:</b>\n\n"
         "– Shaxsiy avtomobilga ega jismoniy shaxslarga\n"
-        "– Kredit summasi: 5 000 000 so'mgacha\n"
+        "– Kredit summasi: 10 000 000 so'mgacha\n"
         "– Kredit muddati: 12 oy\n\n"
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
         "1. Shaxsni tasdiqlovchi hujjat(pasport, id karta)\n"

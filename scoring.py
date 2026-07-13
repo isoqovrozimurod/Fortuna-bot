@@ -84,7 +84,7 @@ TERMS = {
 def get_limit(kredit_turi: str, kredit_summasi: float, ish_joyi: str = "") -> float:
     """Qarz yuki chegarasi — kredit SUMMASI asosida (0.0 - 1.0)"""
     if kredit_turi == "pensiya":
-        return 0.50
+        return 0.75
     elif kredit_turi == "hamkor":
         return 0.50
     elif kredit_turi == "ish_haqi":

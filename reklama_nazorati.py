@@ -76,7 +76,7 @@ _gc: gspread.Client | None = None
 
 
 def _get_gc() -> gspread.Client:
-    """gspread clientini bir marta yaratadi va keshda saqlaydi."""
+    """gspread clientini yaratadi. Xato bo'lsa qayta yaratadi."""
     global _gc
     if _gc is None:
         b64 = os.getenv("GOOGLE_CREDENTIALS_B64")
@@ -86,6 +86,12 @@ def _get_gc() -> gspread.Client:
         creds = Credentials.from_service_account_info(info, scopes=SCOPES)
         _gc   = gspread.authorize(creds)
     return _gc
+
+
+def _reset_gc() -> None:
+    """Sheets ulanishini qayta o'rnatadi (token xatolarida)."""
+    global _gc
+    _gc = None
 
 
 def _ws() -> gspread.Worksheet:
@@ -106,10 +112,24 @@ def _user_ws() -> gspread.Worksheet:
 
 
 def _find_row(ws: gspread.Worksheet, user_id: int) -> int | None:
-    """2-ustunda user_id ni qidiradi. Topsa qator raqamini (1-based) qaytaradi."""
+    """
+    2-ustunda user_id ni qidiradi. Topsa qator raqamini (1-based) qaytaradi.
+    "588979280", "588979280.0", 588979280 — barcha formatlarni qabul qiladi.
+    Sheets ba'zan integer larni float sifatida saqlashi mumkin.
+    """
     for i, v in enumerate(ws.col_values(2), start=1):
-        if str(v).strip() == str(user_id):
+        v_str = str(v).strip()
+        if not v_str:
+            continue
+        # To'g'ridan string taqqoslash
+        if v_str == str(user_id):
             return i
+        # Float format: "588979280.0" → int → taqqoslash
+        try:
+            if int(float(v_str)) == user_id:
+                return i
+        except (ValueError, TypeError):
+            pass
     return None
 
 
@@ -126,6 +146,14 @@ def _get_date_col(ws: gspread.Worksheet, date_str: str) -> int:
     """
     Berilgan sana ustunini topadi yoki yaratadi.
     Har safar Sheets dan fresh o'qiydi — kesh emas.
+
+    MUHIM: yangi ustun yaratilganda katak MAJBURIY matn formatida
+    ("@") belgilanadi. Aks holda Google Sheets "17.07.2026" kabi
+    matnni sana deb tanib, uni serial-sanaga aylantiradi va keyin
+    jadval lokalizatsiyasiga qarab (masalan "7/17/2026") ko'rsatishi
+    mumkin. Natijada datetime.strptime("%d.%m.%Y") mos kelmay, ustun
+    valid_dates ro'yxatidan butunlay tushib qoladi — va statistikada
+    HAMMA uchun 0 ko'rinadi.
     """
     headers = ws.row_values(1)
     for i, h in enumerate(headers):
@@ -133,8 +161,44 @@ def _get_date_col(ws: gspread.Worksheet, date_str: str) -> int:
             return i + 1
     # Ustun yo'q — yangi ustun yaratamiz
     new_col = len(headers) + 1
+    cell    = ws.cell(1, new_col)
+    ws.format(cell.address, {"numberFormat": {"type": "TEXT"}})
     ws.update_cell(1, new_col, date_str)
     return new_col
+
+
+def fix_date_header_formats_sync() -> int:
+    """
+    BIR MARTALIK TUZATISH.
+    Agar sana ustunlari avval Apps Script yoki eski kod tomonidan
+    matn-format majburlanmasdan yaratilgan bo'lsa, Sheets ularni
+    avtomatik sanaga aylantirib qo'ygan bo'lishi mumkin. Bu funksiya
+    barcha BASE_COLS dan keyingi ustunlarni qayta matn formatiga
+    o'tkazadi va sarlavhani "dd.MM.yyyy" ko'rinishida qayta yozadi.
+    Faqat bir marta ishga tushirish kifoya.
+    """
+    sheet   = _ws()
+    headers = sheet.row_values(1)
+    fixed   = 0
+    for i, h in enumerate(headers[BASE_COLS:], start=BASE_COLS + 1):
+        raw = str(h).strip()
+        if not raw:
+            continue
+        # Sheets Date obyektini formatlagan bo'lsa, turli formatlarni sinaymiz
+        normalized = None
+        for fmt in ("%d.%m.%Y", "%m/%d/%Y", "%Y-%m-%d", "%d-%b-%Y", "%b %d, %Y"):
+            try:
+                dt = datetime.strptime(raw, fmt)
+                normalized = dt.strftime("%d.%m.%Y")
+                break
+            except ValueError:
+                continue
+        if normalized and normalized != raw:
+            cell = sheet.cell(1, i)
+            sheet.format(cell.address, {"numberFormat": {"type": "TEXT"}})
+            sheet.update_cell(1, i, normalized)
+            fixed += 1
+    return fixed
 
 
 def _safe_records(ws: gspread.Worksheet) -> list[dict]:
@@ -258,20 +322,28 @@ def _increment_sheet_sync(user_id: int) -> int:
     """
     Sheets dan bugungi qiymatni o'qiydi, +1 qo'shib yozadi.
     Yangi qiymatni qaytaradi. Xato bo'lsa 0 qaytaradi.
+    Ulanish xatosida _gc ni qayta o'rnatadi.
     """
     try:
         sheet    = _ws()
         date_col = _get_date_col(sheet, today_str())
         row      = _find_row(sheet, user_id)
         if not row:
+            # Foydalanuvchi sub_adminlar da yo'q — jiddiy xato
+            logger.error(
+                f"[SHEETS] User {user_id} sub_adminlar da topilmadi! "
+                f"Screenshot hisoblanmadi. /start_register buyrug'ini yuboring."
+            )
             return 0
         val     = sheet.cell(row, date_col).value
         current = int(val) if val and str(val).strip().isdigit() else 0
         next_   = current + 1
         sheet.update_cell(row, date_col, next_)
+        logger.debug(f"[SHEETS] User {user_id}: {today_str()} → {next_}")
         return next_
     except Exception as e:
-        logger.error(f"Sheets increment xato ({user_id}): {e}")
+        logger.error(f"[SHEETS] Increment xato (user={user_id}): {e}")
+        _reset_gc()   # Keyingi urinishda yangi ulanish
         return 0
 
 
@@ -606,7 +678,7 @@ def _stats_sync(days: int) -> list[dict]:
             # Bugungi kun uchun local cache ni ham hisobga olamiz
             if d == today_s:
                 try:
-                    from_local = _local_get(int(tg_id))
+                    from_local = _local_get(int(float(tg_id)))
                     if from_local > from_sheet:
                         from_sheet = from_local
                 except (ValueError, TypeError):
@@ -1118,6 +1190,29 @@ async def cmd_sync(message: Message, bot: Bot):
         loop    = asyncio.get_running_loop()
         updated = await loop.run_in_executor(None, _sync)
         await msg.edit_text(f"✅ Sinxronlash yakunlandi! {updated} ta qator yangilandi.")
+    except Exception as e:
+        await msg.edit_text(f"❌ Xato: {e}")
+    with contextlib.suppress(Exception):
+        await message.delete()
+
+
+@router.message(Command("reklama_sana_tuzat"))
+async def cmd_fix_date_headers(message: Message):
+    """
+    BIR MARTALIK: sana ustunlari formati buzilgan bo'lsa tuzatadi.
+    Agar oylik/haftalik statistika hammada 0 ko'rsatsa — shu buyruqni
+    bir marta ishlating.
+    """
+    if not message.from_user or message.from_user.id != ADMIN_ID:
+        return
+    msg = await message.answer("🔧 Sana ustunlari tekshirilmoqda...")
+    try:
+        loop  = asyncio.get_running_loop()
+        fixed = await loop.run_in_executor(None, fix_date_header_formats_sync)
+        if fixed:
+            await msg.edit_text(f"✅ {fixed} ta sana ustuni tuzatildi! Endi statistikani qayta tekshiring.")
+        else:
+            await msg.edit_text("✅ Barcha sana ustunlari to'g'ri formatda edi.")
     except Exception as e:
         await msg.edit_text(f"❌ Xato: {e}")
     with contextlib.suppress(Exception):

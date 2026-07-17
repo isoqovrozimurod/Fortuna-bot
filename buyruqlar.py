@@ -68,17 +68,18 @@ async def set_bot_commands(bot: Bot):
     scoring_command = BotCommand(command="scoring", description="Scoring — qarz yuki hisoblash")
 
     admin_commands = [
-        BotCommand(command="kredit",           description="Kredit kalkulyator"),
-        BotCommand(command="job",              description="Vakansiya qo'shish"),
-        BotCommand(command="chanel",           description="Majburiy obuna qo'shish"),
-        BotCommand(command="broadcast",        description="Ommaviy xabar yuborish"),
-        BotCommand(command="cleanup_users",    description="Foydalanuvchilar jadvalini tozalash"),
-        BotCommand(command="download",         description="Ma'lumot va fayllarni yuklab olish"),
-        BotCommand(command="reklama_stat",     description="Reklama statistikasi"),
-        BotCommand(command="sync_subadmin",    description="User dan sub_admin ga sinxronlash"),
-        BotCommand(command="reklama_tozala",   description="Dublikat ustunlarni tozalash"),
-        BotCommand(command="filiallar",        description="Filiallar ro'yxati"),
-        BotCommand(command="refresh_branches", description="Filiallarni yangilash"),
+        BotCommand(command="kredit",               description="Kredit kalkulyator"),
+        BotCommand(command="job",                  description="Vakansiya qo'shish"),
+        BotCommand(command="chanel",               description="Majburiy obuna qo'shish"),
+        BotCommand(command="broadcast",            description="Ommaviy xabar yuborish"),
+        BotCommand(command="cleanup_users",        description="Foydalanuvchilar jadvalini tozalash"),
+        BotCommand(command="download",             description="Ma'lumot va fayllarni yuklab olish"),
+        BotCommand(command="sync_subadmin",        description="User dan sub_admin ga sinxronlash"),
+        BotCommand(command="reklama_stat",         description="Reklama statistikasi"),
+        BotCommand(command="reklama_sana_tuzat",   description="Reklama tuzatish"),
+        BotCommand(command="reklama_tozala",       description="Dublikat ustunlarni tozalash"),
+        BotCommand(command="filiallar",            description="Filiallar ro'yxati"),
+        BotCommand(command="refresh_branches",     description="Filiallarni yangilash"),
         scoring_command,
     ]
 

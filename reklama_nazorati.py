@@ -175,7 +175,7 @@ def fix_date_header_formats_sync() -> int:
     avtomatik sanaga aylantirib qo'ygan bo'lishi mumkin. Bu funksiya
     barcha BASE_COLS dan keyingi ustunlarni qayta matn formatiga
     o'tkazadi va sarlavhani "dd.MM.yyyy" ko'rinishida qayta yozadi.
-    Faqat bir marta ishga tushirish kifoya.
+    Faqat bitta marta ishga tushirish kifoya.
     """
     sheet   = _ws()
     headers = sheet.row_values(1)
@@ -532,12 +532,17 @@ async def handle_media(message: Message):
     F.chat.func(lambda c: c.id == GROUP_ID and GROUP_ID != 0),
     ~F.photo,
     ~F.document,
+    # MUHIM: buyruqlarni FILTR DARAJASIDA chetlab o'tamiz.
+    # Funksiya ichidagi "if text.startswith('/'): return" YETARLI EMAS —
+    # aiogram uchun filtr mos kelib handler bir marta chaqirilgan zahoti
+    # event "qayta ishlangan" deb hisoblanadi va keyingi handlerlarga
+    # (jumladan Command("reklama_stat") kabi) umuman yetib bormaydi.
+    # Shu sabab guruhdagi barcha buyruqlar javobsiz qolgan edi.
+    F.func(lambda m: not (m.text or "").startswith("/")),
 )
 async def handle_text(message: Message):
-    """Guruhga yozilgan har qanday matn xabarida ham ro'yxatdan o'tkazadi."""
+    """Guruhga yozilgan (buyruq bo'lmagan) matn xabarida ham ro'yxatdan o'tkazadi."""
     if message.from_user is None or message.from_user.is_bot:
-        return
-    if message.text and message.text.startswith("/"):
         return
     with contextlib.suppress(Exception):
         await register_user(

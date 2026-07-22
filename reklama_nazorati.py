@@ -930,6 +930,26 @@ async def announce_monthly_rating(bot: Bot) -> None:
 
 # ─── QOLDA NAZORAT ────────────────────────────────────────────────────────────
 
+async def ensure_today_column() -> None:
+    """
+    Bugungi sana ustuni mavjudligini tekshiradi, yo'q bo'lsa yaratadi.
+    Bu funksiya har bir nazorat chaqiruvi (check_screenshots, check_midday)
+    boshida ishga tushadi — shu orqali agar 00:00 dagi trigger biror
+    sababdan (server restart, deploy, vaqtinchalik uzilish) ishlamay
+    qolgan bo'lsa ham, ustun keyingi tekshiruvda o'zi tuzatiladi.
+    Avval faqat screenshot yuborilganda yaratilardi — agar hech kim
+    hech narsa yubormasa, ustun umuman paydo bo'lmasdi.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        def _ensure():
+            sheet = _ws()
+            _get_date_col(sheet, today_str())
+        await loop.run_in_executor(None, _ensure)
+    except Exception as e:
+        logger.error(f"ensure_today_column xato: {e}")
+
+
 async def check_screenshots(bot: Bot) -> None:
     """
     Hozirgi holatni guruhga yuboradi: kim bajargan, kim bajarmagan.
@@ -937,6 +957,7 @@ async def check_screenshots(bot: Bot) -> None:
     """
     if GROUP_ID == 0:
         return
+    await ensure_today_column()
     try:
         loop = asyncio.get_running_loop()
         data = await loop.run_in_executor(None, lambda: _safe_records(_ws()))
@@ -1032,6 +1053,7 @@ async def check_midday(bot: Bot) -> None:
     """
     if GROUP_ID == 0:
         return
+    await ensure_today_column()
     try:
         loop = asyncio.get_running_loop()
         data = await loop.run_in_executor(None, lambda: _safe_records(_ws()))
@@ -1350,6 +1372,12 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         CronTrigger(hour=0, minute=0, timezone=TZ_STR),
         id="daily_col", replace_existing=True,
     )
+
+    # Bot har ishga tushganda (yoki restart bo'lganda) darhol tekshiradi —
+    # 00:00 trigger biror sababdan o'tkazib yuborilgan bo'lsa ham,
+    # bugungi ustun 00:00 ni kutmasdan zudlik bilan yaratiladi.
+    asyncio.ensure_future(ensure_today_column())
+
     sched.add_job(
         lambda: asyncio.ensure_future(check_screenshots(bot)),
         CronTrigger(hour=9, minute=30, timezone=TZ_STR),

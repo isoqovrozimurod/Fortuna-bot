@@ -147,23 +147,51 @@ def _get_date_col(ws: gspread.Worksheet, date_str: str) -> int:
     Berilgan sana ustunini topadi yoki yaratadi.
     Har safar Sheets dan fresh o'qiydi — kesh emas.
 
-    MUHIM: yangi ustun yaratilganda katak MAJBURIY matn formatida
-    ("@") belgilanadi. Aks holda Google Sheets "17.07.2026" kabi
-    matnni sana deb tanib, uni serial-sanaga aylantiradi va keyin
+    MUHIM (format): yangi ustun yaratilganda katak MAJBURIY matn
+    formatida ("@") belgilanadi. Aks holda Google Sheets "17.07.2026"
+    kabi matnni sana deb tanib, uni serial-sanaga aylantiradi va keyin
     jadval lokalizatsiyasiga qarab (masalan "7/17/2026") ko'rsatishi
     mumkin. Natijada datetime.strptime("%d.%m.%Y") mos kelmay, ustun
-    valid_dates ro'yxatidan butunlay tushib qoladi — va statistikada
-    HAMMA uchun 0 ko'rinadi.
+    valid_dates ro'yxatidan butunlay tushib qoladi.
+
+    MUHIM (sig'im): agar yangi ustun varaqning joriy col_count dan
+    oshib ketsa, avval MAJBURIY resize() chaqiriladi. Google Sheets
+    API values.update() ba'zan chegaradan tashqariga avtomatik
+    kengaymaydi (ayniqsa butun faylning 10 million katak limitiga
+    yaqinlashganda) — bunday holda xato jim yutilib, ustun umuman
+    yaratilmay qoladi. Endi xato aniq ko'rinadi (RuntimeError bilan)
+    va logga to'liq sabab bilan yoziladi.
     """
     headers = ws.row_values(1)
     for i, h in enumerate(headers):
         if str(h).strip() == date_str:
             return i + 1
+
     # Ustun yo'q — yangi ustun yaratamiz
     new_col = len(headers) + 1
-    cell    = ws.cell(1, new_col)
-    ws.format(cell.address, {"numberFormat": {"type": "TEXT"}})
-    ws.update_cell(1, new_col, date_str)
+
+    # Agar varaqning joriy ustun soni yetarli bo'lmasa, avval kengaytiramiz
+    if new_col > ws.col_count:
+        try:
+            ws.resize(cols=new_col + 10)  # ehtiyot uchun bir oz zaxira bilan
+        except Exception as e:
+            raise RuntimeError(
+                f"Sana ustunini kengaytirib bo'lmadi (col_count={ws.col_count}, "
+                f"kerak={new_col}). Ehtimol butun fayl 10 million katak "
+                f"limitiga yetgan — boshqa varaqlardagi keraksiz bo'sh "
+                f"qator/ustunlarni qisqartiring. Asl xato: {e}"
+            ) from e
+
+    try:
+        cell = ws.cell(1, new_col)
+        ws.format(cell.address, {"numberFormat": {"type": "TEXT"}})
+        ws.update_cell(1, new_col, date_str)
+    except Exception as e:
+        raise RuntimeError(
+            f"Sana ustunini yozib bo'lmadi (ustun {new_col}, sana {date_str}). "
+            f"Asl xato: {e}"
+        ) from e
+
     return new_col
 
 
@@ -930,7 +958,7 @@ async def announce_monthly_rating(bot: Bot) -> None:
 
 # ─── QOLDA NAZORAT ────────────────────────────────────────────────────────────
 
-async def ensure_today_column() -> None:
+async def ensure_today_column(bot: Bot | None = None) -> None:
     """
     Bugungi sana ustuni mavjudligini tekshiradi, yo'q bo'lsa yaratadi.
     Bu funksiya har bir nazorat chaqiruvi (check_screenshots, check_midday)
@@ -939,6 +967,11 @@ async def ensure_today_column() -> None:
     qolgan bo'lsa ham, ustun keyingi tekshiruvda o'zi tuzatiladi.
     Avval faqat screenshot yuborilganda yaratilardi — agar hech kim
     hech narsa yubormasa, ustun umuman paydo bo'lmasdi.
+
+    Agar bot berilgan bo'lsa va ustun yaratib bo'lmasa (masalan,
+    Google Sheets 10 million katak limitiga yetgan bo'lsa), bu haqda
+    ADMIN_ID ga darhol xabar yuboradi — Railway loglarida ko'milib
+    qolmasligi uchun.
     """
     try:
         loop = asyncio.get_running_loop()
@@ -948,6 +981,16 @@ async def ensure_today_column() -> None:
         await loop.run_in_executor(None, _ensure)
     except Exception as e:
         logger.error(f"ensure_today_column xato: {e}")
+        if bot and ADMIN_ID:
+            with contextlib.suppress(Exception):
+                await bot.send_message(
+                    ADMIN_ID,
+                    f"🚨 <b>Bugungi sana ustunini yaratib bo'lmadi!</b>\n\n"
+                    f"<code>{e}</code>\n\n"
+                    f"<i>Sheets to'liq bo'lib qolgan bo'lishi mumkin — "
+                    f"boshqa varaqlardagi bo'sh qator/ustunlarni tekshiring.</i>",
+                    parse_mode="HTML",
+                )
 
 
 async def check_screenshots(bot: Bot) -> None:
@@ -957,7 +1000,7 @@ async def check_screenshots(bot: Bot) -> None:
     """
     if GROUP_ID == 0:
         return
-    await ensure_today_column()
+    await ensure_today_column(bot)
     try:
         loop = asyncio.get_running_loop()
         data = await loop.run_in_executor(None, lambda: _safe_records(_ws()))
@@ -1053,7 +1096,7 @@ async def check_midday(bot: Bot) -> None:
     """
     if GROUP_ID == 0:
         return
-    await ensure_today_column()
+    await ensure_today_column(bot)
     try:
         loop = asyncio.get_running_loop()
         data = await loop.run_in_executor(None, lambda: _safe_records(_ws()))
@@ -1376,7 +1419,7 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     # Bot har ishga tushganda (yoki restart bo'lganda) darhol tekshiradi —
     # 00:00 trigger biror sababdan o'tkazib yuborilgan bo'lsa ham,
     # bugungi ustun 00:00 ni kutmasdan zudlik bilan yaratiladi.
-    asyncio.ensure_future(ensure_today_column())
+    asyncio.ensure_future(ensure_today_column(bot))
 
     sched.add_job(
         lambda: asyncio.ensure_future(check_screenshots(bot)),

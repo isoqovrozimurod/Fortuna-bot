@@ -38,6 +38,7 @@ from reklama_nazorati import router as reklama_router, setup_scheduler
 from broadcast import router as broadcast_router
 from download import router as download_router
 from scoring import router as scoring_router
+from personal_message import router as personal_message_router
 
 
 # =================== LOGGING ===================
@@ -124,6 +125,7 @@ def setup_dispatcher() -> Dispatcher:
     dp.include_router(filial_router)
     dp.include_router(broadcast_router)
     dp.include_router(scoring_router)
+    dp.include_router(personal_message_router)
 
     return dp
 

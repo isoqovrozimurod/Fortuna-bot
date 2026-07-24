@@ -40,6 +40,7 @@ from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    KeyboardButtonRequestUsers,
 )
 
 logger = logging.getLogger(__name__)
@@ -155,11 +156,12 @@ _campaigns: dict[str, dict] = {}
 # ── FSM ──────────────────────────────────────────────────────────────────
 
 class PersonalMsgFSM(StatesGroup):
-    search          = State()   # qidiruv matni kutilmoqda
-    waiting_contact = State()   # telefon kontakti kutilmoqda
-    waiting_forward = State()   # forward xabar kutilmoqda
-    composing       = State()   # yuboriladigan kontent kutilmoqda
-    edit_wait       = State()   # tahrirlash uchun yangi matn kutilmoqda
+    search           = State()   # qidiruv matni kutilmoqda
+    waiting_contact  = State()   # telefon kontakti kutilmoqda
+    waiting_chat_pick = State()  # Telegram chat-picker orqali tanlov kutilmoqda
+    waiting_forward  = State()   # forward xabar kutilmoqda
+    composing        = State()   # yuboriladigan kontent kutilmoqda
+    edit_wait        = State()   # tahrirlash uchun yangi matn kutilmoqda
 
 
 def _is_admin(user_id: int) -> bool:
@@ -207,12 +209,37 @@ def _search_results_kb(results: list[dict], picked: set[int]) -> InlineKeyboardM
 
 
 def _contact_choice_kb() -> InlineKeyboardMarkup:
-    """Kontakt tanlashning ikki usuli: telefon daftaridan yoki bizning bazadan."""
+    """Qabul qiluvchini tanlashning uch usuli."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📱 Telefon kontaktidan", callback_data="pm_contact_phone")],
-        [InlineKeyboardButton(text="📋 Bizning ro'yxatdan",   callback_data="pm_contact_db")],
-        [InlineKeyboardButton(text="⬅️ Orqaga",               callback_data="pm_back_menu")],
+        [InlineKeyboardButton(text="📱 Telefon kontaktidan",      callback_data="pm_contact_phone")],
+        [InlineKeyboardButton(text="💬 Shaxsiy chatlaringizdan",  callback_data="pm_contact_chat")],
+        [InlineKeyboardButton(text="📋 Bizning ro'yxatdan",        callback_data="pm_contact_db")],
+        [InlineKeyboardButton(text="⬅️ Orqaga",                    callback_data="pm_back_menu")],
     ])
+
+
+def _telegram_chat_pick_kb() -> ReplyKeyboardMarkup:
+    """
+    Telegramning o'z ichki 'foydalanuvchi tanlash' pickeri.
+    Admin o'zining istalgan shaxsiy chatidan (telefon kitobiga
+    bog'liq bo'lmagan holda) kimnidir tanlab yuborishi mumkin.
+    Bot API 7.0+ va aiogram 3.4+ talab qilinadi.
+    """
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(
+                text="💬 Chatdan foydalanuvchi tanlash",
+                request_users=KeyboardButtonRequestUsers(
+                    request_id=1,
+                    max_quantity=10,
+                    request_name=True,
+                    request_username=True,
+                ),
+            )],
+            [KeyboardButton(text="❌ Bekor qilish")],
+        ],
+        resize_keyboard=True, one_time_keyboard=True,
+    )
 
 
 def _contact_kb() -> ReplyKeyboardMarkup:
@@ -347,6 +374,12 @@ async def pm_contact_cancel(message: Message, state: FSMContext):
     await message.answer("🚫 Bekor qilindi.", reply_markup=ReplyKeyboardRemove())
 
 
+@router.message(PersonalMsgFSM.waiting_chat_pick, F.text == "❌ Bekor qilish")
+async def pm_chat_pick_cancel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("🚫 Bekor qilindi.", reply_markup=ReplyKeyboardRemove())
+
+
 # ── 1) Qidirish orqali tanlash ───────────────────────────────────────────
 
 @router.callback_query(F.data == "pm_search")
@@ -473,6 +506,75 @@ async def pm_contact_received(message: Message, state: FSMContext):
     await state.update_data(recipients=recipients)
     await state.set_state(None)
     await message.answer(f"✅ Qo'shildi: {label}", reply_markup=ReplyKeyboardRemove())
+    await message.answer(
+        f"📨 <b>Shaxsiy xabar yuborish</b>\n\nTanlangan: {len(recipients)} kishi",
+        reply_markup=_menu_kb(recipients), parse_mode="HTML",
+    )
+
+
+# — 2c) Telegramning o'z chat/kontakt ro'yxatidan (telefon kitobiga bog'liq emas) —
+
+@router.callback_query(F.data == "pm_contact_chat")
+async def pm_contact_chat_btn(call: CallbackQuery, state: FSMContext):
+    if not _is_admin(call.from_user.id):
+        return
+    await call.answer()
+    await state.set_state(PersonalMsgFSM.waiting_chat_pick)
+    with contextlib.suppress(Exception):
+        await call.message.delete()
+    await call.message.answer(
+        "💬 Quyidagi tugmani bosib, Telegramdagi istalgan shaxsiy chatingizdan "
+        "birortasini tanlang (telefon raqami shart emas):",
+        reply_markup=_telegram_chat_pick_kb(),
+    )
+
+
+@router.message(PersonalMsgFSM.waiting_chat_pick, F.users_shared)
+async def pm_users_shared(message: Message, state: FSMContext):
+    """
+    Telegram 'foydalanuvchi tanlash' pickeridan kelgan javobni qayta ishlaydi.
+    Bot API versiyasiga qarab natija ikki xil shaklda kelishi mumkin:
+    yangi 'users' (SharedUser obyektlari) yoki eski 'user_ids' (oddiy ID lar).
+    Ikkalasini ham qo'llab-quvvatlaymiz.
+    """
+    shared = message.users_shared
+    picked_users = list(getattr(shared, "users", None) or [])
+    if not picked_users:
+        for uid in getattr(shared, "user_ids", []) or []:
+            picked_users.append(type("_U", (), {
+                "user_id": uid, "first_name": None,
+                "last_name": None, "username": None,
+            })())
+
+    if not picked_users:
+        await message.answer(
+            "❌ Hech kim tanlanmadi.", reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    data       = await state.get_data()
+    recipients = data.get("recipients", [])
+    existing   = {r["id"] for r in recipients}
+    added      = []
+
+    for u in picked_users:
+        uid = u.user_id
+        if uid in existing:
+            continue
+        first = getattr(u, "first_name", None) or ""
+        last  = getattr(u, "last_name", None) or ""
+        uname = getattr(u, "username", None)
+        label = f"{first} {last}".strip() or (f"@{uname}" if uname else str(uid))
+        recipients.append({"id": uid, "label": label})
+        existing.add(uid)
+        added.append(label)
+
+    await state.update_data(recipients=recipients)
+    await state.set_state(None)
+    await message.answer(
+        f"✅ Qo'shildi: {', '.join(added) if added else '(hech kim, allaqachon ro\'yxatda)'}",
+        reply_markup=ReplyKeyboardRemove(),
+    )
     await message.answer(
         f"📨 <b>Shaxsiy xabar yuborish</b>\n\nTanlangan: {len(recipients)} kishi",
         reply_markup=_menu_kb(recipients), parse_mode="HTML",
@@ -718,7 +820,7 @@ async def pm_send(call: CallbackQuery, state: FSMContext, bot: Bot):
 # ── Yuborilgan kampaniyani tahrirlash / o'chirish ────────────────────────
 
 @router.callback_query(F.data.startswith("pmc_info_"))
-async def pmc_info(call: CallbackQuery):
+async def pmc_info(call: CallbackQuery, state: FSMContext):
     if not _is_admin(call.from_user.id):
         return
     campaign_id = call.data.split("_", 2)[2]
@@ -726,6 +828,7 @@ async def pmc_info(call: CallbackQuery):
     if not camp:
         await call.answer("❌ Topilmadi (bot qayta ishga tushgandan keyin xotira tozalanadi)", show_alert=True)
         return
+    await state.clear()  # agar tahrirlash o'rtasida "Orqaga" bosilgan bo'lsa ham holat tozalanadi
     await call.answer()
     await call.message.edit_text(
         f"🆔 Kampaniya: <code>{campaign_id}</code>\n"
@@ -771,11 +874,16 @@ async def pmc_edit_start(call: CallbackQuery, state: FSMContext):
     await call.answer()
     await state.set_state(PersonalMsgFSM.edit_wait)
     await state.update_data(edit_campaign_id=campaign_id)
+    edit_cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"pmc_info_{campaign_id}")],
+        [InlineKeyboardButton(text="🚫 Bekor qilish", callback_data="pm_cancel")],
+    ])
     await call.message.answer(
         "✏️ Yangi matnni yuboring:\n\n"
         "<i>Eslatma: bu faqat matnli xabarlarni yoki media izohini (caption) "
         "tahrirlaydi. Rasm/videoning o'zini almashtirish qo'llab-quvvatlanmaydi — "
         "bunday holda avval o'chirib, qaytadan yuborish tavsiya etiladi.</i>",
+        reply_markup=edit_cancel_kb,
         parse_mode="HTML",
     )
 

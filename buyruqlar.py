@@ -80,6 +80,8 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="reklama_tozala",       description="Dublikat ustunlarni tozalash"),
         BotCommand(command="filiallar",            description="Filiallar ro'yxati"),
         BotCommand(command="refresh_branches",     description="Filiallarni yangilash"),
+        BotCommand(command="xabar",      description="Shaxsiy xabar yuborish"),
+        BotCommand(command="xabarlarim", description="Yuborilgan xabarlar ro'yxati"),
         scoring_command,
     ]
 

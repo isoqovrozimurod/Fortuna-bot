@@ -26,7 +26,7 @@ from buyruqlar import set_bot_commands
 from valyuta import router as valyuta_router
 from vakansiya import router as vakansiya_router
 from biznes import router as biznes_router
-from control import router as control_router
+from control import router as control_router, setup_control_scheduler
 from chanel import router as chanel_router, SubscriptionMiddleware
 from kredit import router as kredit_admin_router
 from hamkor import router as hamkor_router
@@ -105,6 +105,7 @@ def setup_dispatcher() -> Dispatcher:
     dp.callback_query.middleware(SubscriptionMiddleware())
 
     dp.include_router(chanel_router)
+    dp.include_router(control_router)
     dp.include_router(reklama_router)
     dp.include_router(start_router)
     dp.include_router(contact_router)
@@ -120,7 +121,6 @@ def setup_dispatcher() -> Dispatcher:
     dp.include_router(calc_router)
     dp.include_router(valyuta_router)
     dp.include_router(vakansiya_router)
-    dp.include_router(control_router)
     dp.include_router(kredit_admin_router)
     dp.include_router(filial_router)
     dp.include_router(broadcast_router)

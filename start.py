@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 from pathlib import Path
 
 from aiogram import Router, Bot, types, F
@@ -13,10 +14,17 @@ from aiogram.types import (
 
 from broadcast import save_user
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 TEMP_DIR    = Path(__file__).resolve().parent / "temp"
 PROMO_IMAGE = TEMP_DIR / "fortuna.jpg"
+
+# Birinchi muvaffaqiyatli yuklashdan keyin Telegram qaytargan file_id
+# shu yerda keshlanadi. Bot qayta ishga tushganda (deploy/restart)
+# tozalanadi — shundan keyingi BIRINCHI /start yana to'liq yuklaydi,
+# undan keyingisi tez ishlaydi.
+_cached_file_id: str | None = None
 
 
 def main_menu_markup() -> InlineKeyboardMarkup:
@@ -50,20 +58,38 @@ def promo_caption() -> str:
 
 
 async def send_promo(bot: Bot, user_id: int) -> None:
-    if PROMO_IMAGE.exists():
-        await bot.send_photo(
-            user_id, FSInputFile(PROMO_IMAGE),
-            caption=promo_caption(),
-            reply_markup=main_menu_markup(),
-            parse_mode=ParseMode.HTML,
-        )
-    else:
-        await bot.send_message(
-            user_id, promo_caption(),
-            reply_markup=main_menu_markup(),
-            parse_mode=ParseMode.HTML,
-        )
+    global _cached_file_id
 
+    caption = promo_caption()
+    markup  = main_menu_markup()
+
+    if _cached_file_id:
+        try:
+            await bot.send_photo(
+                user_id, _cached_file_id,
+                caption=caption, reply_markup=markup, parse_mode=ParseMode.HTML,
+            )
+            return
+        except Exception as e:
+            logger.warning(f"Keshlangan file_id ishlamadi, qayta yuklaymiz: {e}")
+            _cached_file_id = None
+
+    if PROMO_IMAGE.exists():
+        try:
+            sent = await bot.send_photo(
+                user_id, FSInputFile(PROMO_IMAGE),
+                caption=caption, reply_markup=markup, parse_mode=ParseMode.HTML,
+            )
+            if sent.photo:
+                _cached_file_id = sent.photo[-1].file_id
+            return
+        except Exception as e:
+            logger.error(f"send_photo xato, matn bilan davom etamiz: {e}")
+
+    with contextlib.suppress(Exception):
+        await bot.send_message(
+            user_id, caption, reply_markup=markup, parse_mode=ParseMode.HTML,
+        )
 
 @router.message(Command("start"))
 async def cmd_start(message: types.Message, bot: Bot, state: FSMContext):
@@ -75,7 +101,6 @@ async def cmd_start(message: types.Message, bot: Bot, state: FSMContext):
         username=user.username or "",
     )
     await send_promo(bot, user.id)
-
 
 @router.callback_query(F.data == "back_to_menu")
 async def back_to_menu(callback: types.CallbackQuery, bot: Bot):

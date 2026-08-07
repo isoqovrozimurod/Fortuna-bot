@@ -1,22 +1,3 @@
-"""
-personal_message.py — Admin uchun shaxsiy xabar yuborish moduli.
-
-DIQQAT: bu broadcast.py EMAS. broadcast.py — barcha foydalanuvchilarga
-ommaviy xabar. Bu fayl — bitta yoki bir nechta TANLANGAN foydalanuvchiga
-maqsadli xabar yuborish uchun, mutlaqo alohida va mustaqil modul.
-
-Imkoniyatlar:
-  • Qabul qiluvchini tanlash usullari:
-      🔍 Qidirish   — ism, username, telefon yoki Telegram ID bo'yicha
-      👤 Kontakt    — (a) Telegram ilovasining o'z kontakt daftaridan
-                       (b) yoki bizning bazamiz ro'yxatidan
-      ↩️ Forward    — foydalanuvchi xabarini forward qilib
-  • Bir nechta qabul qiluvchini bitta xabarga tanlash
-  • Xabar ISTALGAN formatda (matn, rasm, video, fayl, ovoz va h.k.)
-  • Yuborish, bekor qilish, tahrirlash (matn/izoh), o'chirish
-
-FAQAT ADMIN_ID uchun ishlaydi.
-"""
 from __future__ import annotations
 
 import os

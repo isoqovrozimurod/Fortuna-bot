@@ -68,11 +68,6 @@ def _pick(rec: dict, keys: list[str]) -> str:
 
 
 def _load_users_sync() -> list[dict]:
-    """
-    'user' varag'idan barcha foydalanuvchilarni o'qib, normallashtirilgan
-    dict ro'yxatini qaytaradi: {id, username, ism, familiya, fullname,
-    telefon, holati}
-    """
     gc       = _get_gc()
     ws       = gc.open_by_key(SPREADSHEET_ID).worksheet(USER_SHEET)
     all_vals = ws.get_all_values()

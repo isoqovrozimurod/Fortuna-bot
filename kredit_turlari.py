@@ -12,14 +12,22 @@ BANNER = BASE_DIR / "temp" / "full_banner" / "banner_barchasi.jpg"
 def kredit_turlari_kb():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Pensiya",           callback_data="pensiya")],
-            [InlineKeyboardButton(text="💼 Ish haqi",          callback_data="ish_haqi")],
-            [InlineKeyboardButton(text="🚗 Avtomashina garov", callback_data="garov")],
-            [InlineKeyboardButton(text="🏢 Biznes uchun",      callback_data="biznes")],
-            [InlineKeyboardButton(text="🤝 Hamkor",            callback_data="hamkor")],
-            [InlineKeyboardButton(text="🚘 Avto-Drive",        callback_data="avto_drive")],
-            [InlineKeyboardButton(text="🚖 Taxi-Bandlik",      callback_data="taxi_bandlik")],
-            [InlineKeyboardButton(text="🏠 Oila mikroqarzi",   callback_data="oila")],
+            [
+                InlineKeyboardButton(text="✅ Pensiya",           callback_data="pensiya"),
+                InlineKeyboardButton(text="💼 Ish haqi",          callback_data="ish_haqi"),
+            ],
+            [
+                InlineKeyboardButton(text="🚗 Avtomashina garov", callback_data="garov"),
+                InlineKeyboardButton(text="🏢 Biznes uchun",      callback_data="biznes"),
+            ],
+            [
+                InlineKeyboardButton(text="🤝 Hamkor",            callback_data="hamkor"),
+                InlineKeyboardButton(text="🚘 Avto-Drive",        callback_data="avto_drive"),
+            ],
+            [
+                InlineKeyboardButton(text="🚖 Taxi-Bandlik",      callback_data="taxi_bandlik"),
+                InlineKeyboardButton(text="🏠 OILA mikroqarzi",   callback_data="oila"),
+            ],
             [InlineKeyboardButton(text="⬅️ Ortga",             callback_data="back_to_menu")],
         ]
     )

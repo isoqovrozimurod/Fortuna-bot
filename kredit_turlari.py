@@ -26,7 +26,7 @@ def kredit_turlari_kb():
             ],
             [
                 InlineKeyboardButton(text="🚖 Taxi-Bandlik",      callback_data="taxi_bandlik"),
-                InlineKeyboardButton(text="🏠 OILA mikroqarzi",   callback_data="oila"),
+                InlineKeyboardButton(text="🏠 OILA (Migrantlar uchun)",   callback_data="oila"),
             ],
             [InlineKeyboardButton(text="⬅️ Ortga",             callback_data="back_to_menu")],
         ]

@@ -5,13 +5,15 @@ Bot: screenshot hisoblash, reyting, statistika
 """
 
 import os
+import re
 import base64
 import json
 import asyncio
 import logging
 import contextlib
 import random
-from datetime import datetime, timedelta
+import calendar
+from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -51,6 +53,36 @@ SCOPES = [
 ]
 BASE_COLS    = 8   # T/r, Telegram ID, Username, Ism, Familiya, Telefon, Sana, Holati
 DAILY_TARGET = 2   # Kunlik maqsad (screenshot soni)
+
+# Oylik birlashtirish uchun: oy tugaganidan keyin necha kun kutiladi
+MONTH_CONSOLIDATE_GRACE_DAYS = 5
+
+UZBEK_MONTHS = {
+    1: "Yanvar", 2: "Fevral", 3: "Mart", 4: "Aprel",
+    5: "May", 6: "Iyun", 7: "Iyul", 8: "Avgust",
+    9: "Sentyabr", 10: "Oktyabr", 11: "Noyabr", 12: "Dekabr",
+}
+
+
+def _month_label(year: int, month: int) -> str:
+    """(2026, 3) -> 'Mart 2026'"""
+    return f"{UZBEK_MONTHS[month]} {year}"
+
+
+def _parse_daily_header(h: str) -> tuple[int, int, int] | None:
+    """'17.07.2026' -> (2026, 7, 17). Oylik sarlavha ('Mart 2026') bo'lsa None."""
+    try:
+        dt = datetime.strptime(h.strip(), "%d.%m.%Y")
+        return dt.year, dt.month, dt.day
+    except ValueError:
+        return None
+
+
+def _is_month_over_grace(year: int, month: int, today: date,
+                         grace_days: int = MONTH_CONSOLIDATE_GRACE_DAYS) -> bool:
+    """Oy tugaganidan keyin grace_days kun o'tganmi."""
+    last_day = date(year, month, calendar.monthrange(year, month)[1])
+    return (today - last_day).days >= grace_days
 
 
 # ─── PROGRESS BAR ─────────────────────────────────────────────────────────────
@@ -290,6 +322,189 @@ def _cleanup_duplicate_cols_sync_inner(sheet: gspread.Worksheet) -> int:
 def _cleanup_duplicate_cols_sync() -> int:
     """sub_adminlar varaqidagi dublikat ustunlarni tozalaydi."""
     return _cleanup_duplicate_cols_sync_inner(_ws())
+
+
+# ─── TO'LIQ TOZALASH (oylik birlashtirish + dublikat + bo'sh ustun) ───────────
+# /reklama_tozala va /reklama_sana_tuzat BITTA shu funksiyaga birlashtirildi.
+
+def full_sheet_maintenance_sync() -> dict:
+    """
+    sub_adminlar varag'ini to'liq tartibga soladi, BITTA yozish bilan:
+
+      1. Buzilgan sana sarlavhalarini "dd.mm.yyyy" ga tuzatadi
+         (Sheets ba'zan matnni avtomatik sanaga aylantirib, boshqa
+         formatda ko'rsatib qo'yishi mumkin edi).
+      2. Bir xil sarlavhali (dublikat) kunlik ustunlarni qiymatlarini
+         qo'shib, bittaga birlashtiradi.
+      3. Oyi tugab, MONTH_CONSOLIDATE_GRACE_DAYS (5) kundan ortiq vaqt
+         o'tgan kunlik ustunlarni — HAR BIR foydalanuvchi uchun
+         yig'indisini hisoblab — bitta "Mart 2026" kabi oylik ustunga
+         birlashtiradi. Joriy va yaqinda tugagan (hali 5 kun to'lmagan)
+         oy kunlik ustunlar holida qoladi.
+      4. Bo'sh (barcha foydalanuvchida 0/bo'sh) ustunlarni o'chiradi —
+         BUGUNGI kun ustuni bundan mustasno (u hali to'ldirilmagan
+         bo'lishi mumkin, o'chirib bo'lmaydi).
+
+    Natija: {"consolidated": N, "duplicates_merged": N, "empty_removed": N}
+    Agar o'zgarish bo'lmasa — Sheets'ga umuman yozilmaydi (behuda
+    API chaqiruvidan saqlanish uchun).
+    """
+    sheet    = _ws()
+    all_vals = sheet.get_all_values()
+    if len(all_vals) < 2:
+        return {"consolidated": 0, "duplicates_merged": 0, "empty_removed": 0}
+
+    raw_headers = [str(h).strip() for h in all_vals[0]]
+    data_rows   = [
+        row + [""] * max(0, len(raw_headers) - len(row))
+        for row in all_vals[1:]
+    ]
+    today = now_tz().date()
+
+    # ── 1) Sarlavhalarni normallashtirish ──
+    fixed_headers = []
+    for h in raw_headers:
+        if re.match(r"^\d{2}\.\d{2}\.\d{4}$", h):
+            fixed_headers.append(h)
+            continue
+        normalized = None
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%d-%b-%Y", "%b %d, %Y"):
+            try:
+                normalized = datetime.strptime(h, fmt).strftime("%d.%m.%Y")
+                break
+            except ValueError:
+                continue
+        fixed_headers.append(normalized if normalized else h)
+
+    base_headers = fixed_headers[:BASE_COLS]
+    rest         = fixed_headers[BASE_COLS:]
+
+    # ── 2) Dublikatlarni guruhlash (bir xil sarlavhali ustunlar) ──
+    seen: dict[str, int] = {}
+    groups: dict[int, list[int]] = {}   # first_pos -> [pos, pos, ...] (o'zi ham ichida)
+    duplicates_merged = 0
+    for i, h in enumerate(rest):
+        if not h:
+            continue
+        if h in seen:
+            groups[seen[h]].append(i)
+            duplicates_merged += 1
+        else:
+            seen[h] = i
+            groups[i] = [i]
+
+    # ── 3) Qaysi guruhlar oylik birlashtirishga tayyor ──
+    month_buckets: dict[tuple[int, int], list[int]] = {}
+    pos_to_month: dict[int, tuple[int, int]] = {}
+    for first_pos in groups:
+        parsed = _parse_daily_header(rest[first_pos])
+        if parsed and _is_month_over_grace(parsed[0], parsed[1], today):
+            key = (parsed[0], parsed[1])
+            month_buckets.setdefault(key, []).append(first_pos)
+            pos_to_month[first_pos] = key
+
+    def _group_sum(row: list[str], positions: list[int]) -> int:
+        total = 0
+        for p in positions:
+            for col_idx in groups[p]:
+                idx = BASE_COLS + col_idx
+                v   = row[idx] if idx < len(row) else ""
+                if str(v).strip().isdigit():
+                    total += int(v)
+        return total
+
+    # ── 4) Yangi ustunlar rejasini asl (chapdan-o'ngga) tartibda quramiz ──
+    plan: list[tuple] = []   # ("keep", pos) yoki ("month", (year, month))
+    emitted_months: set[tuple] = set()
+    consolidated_count = 0
+    for first_pos in sorted(groups.keys()):
+        if first_pos in pos_to_month:
+            key = pos_to_month[first_pos]
+            if key not in emitted_months:
+                plan.append(("month", key))
+                emitted_months.add(key)
+                consolidated_count += 1
+            # aks holda: bu oyning boshqa ustuni — allaqachon chiqarilgan, o'tkazamiz
+        else:
+            plan.append(("keep", first_pos))
+
+    new_headers = list(base_headers)
+    for kind, val in plan:
+        if kind == "keep":
+            new_headers.append(rest[val])
+        else:
+            new_headers.append(_month_label(*val))
+
+    new_rows = []
+    for row in data_rows:
+        new_row = list(row[:BASE_COLS])
+        for kind, val in plan:
+            if kind == "keep":
+                total = _group_sum(row, [val])
+            else:
+                total = _group_sum(row, month_buckets[val])
+            new_row.append(str(total) if total else "")
+        new_rows.append(new_row)
+
+    # ── 5) Bo'sh ustunlarni aniqlash (bugungi kun ustuni mustasno) ──
+    today_str_val = today.strftime("%d.%m.%Y")
+    keep_mask = [True] * len(new_headers)
+    for ci in range(BASE_COLS, len(new_headers)):
+        if new_headers[ci] == today_str_val:
+            continue
+        if all(not str(r[ci]).strip() for r in new_rows):
+            keep_mask[ci] = False
+
+    empty_removed = keep_mask.count(False)
+    if empty_removed:
+        new_headers = [h for h, k in zip(new_headers, keep_mask) if k]
+        new_rows    = [[v for v, k in zip(r, keep_mask) if k] for r in new_rows]
+
+    # ── 6) Hech narsa o'zgarmagan bo'lsa — Sheets'ga yozmaymiz ──
+    headers_changed = (fixed_headers != raw_headers)
+    if not (headers_changed or duplicates_merged or consolidated_count or empty_removed):
+        return {"consolidated": 0, "duplicates_merged": 0, "empty_removed": 0}
+
+    # ── 7) Bitta yozish bilan Sheets'ni yangilaymiz ──
+    old_col_count = len(raw_headers)
+    new_col_count = len(new_headers)
+    full_grid     = [new_headers] + new_rows
+    end_row       = len(full_grid)
+
+    sheet.update(
+        f"A1:{_col_letter(new_col_count)}{end_row}",
+        full_grid, value_input_option="RAW",
+    )
+
+    if old_col_count > new_col_count:
+        max_row = max(end_row, len(all_vals))
+        sheet.batch_clear([
+            f"{_col_letter(new_col_count + 1)}1:{_col_letter(old_col_count)}{max_row}"
+        ])
+
+    # Yangi/qolgan sana-turdagi ustunlarni matn formatida mahkamlaymiz
+    for ci in range(BASE_COLS, new_col_count):
+        with contextlib.suppress(Exception):
+            sheet.format(f"{_col_letter(ci + 1)}1", {"numberFormat": {"type": "TEXT"}})
+
+    return {
+        "consolidated": consolidated_count,
+        "duplicates_merged": duplicates_merged,
+        "empty_removed": empty_removed,
+    }
+
+
+async def run_full_maintenance(bot: Bot | None = None) -> dict:
+    """Async wrapper. Xato bo'lsa loglaydi va (bot berilgan bo'lsa) adminga yozadi."""
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, full_sheet_maintenance_sync)
+    except Exception as e:
+        logger.error(f"full_sheet_maintenance xato: {e}")
+        if bot and ADMIN_ID:
+            with contextlib.suppress(Exception):
+                await bot.send_message(ADMIN_ID, f"🚨 Sheets tozalashda xato:\n<code>{e}</code>", parse_mode="HTML")
+        return {"consolidated": 0, "duplicates_merged": 0, "empty_removed": 0}
 
 
 # ─── LOCAL KESH ───────────────────────────────────────────────────────────────
@@ -1266,46 +1481,39 @@ async def cmd_sync(message: Message, bot: Bot):
         await message.delete()
 
 
-@router.message(Command("reklama_sana_tuzat"))
-async def cmd_fix_date_headers(message: Message):
-    """
-    BIR MARTALIK: sana ustunlari formati buzilgan bo'lsa tuzatadi.
-    Agar oylik/haftalik statistika hammada 0 ko'rsatsa — shu buyruqni
-    bir marta ishlating.
-    """
-    if not message.from_user or message.from_user.id != ADMIN_ID:
-        return
-    msg = await message.answer("🔧 Sana ustunlari tekshirilmoqda...")
-    try:
-        loop  = asyncio.get_running_loop()
-        fixed = await loop.run_in_executor(None, fix_date_header_formats_sync)
-        if fixed:
-            await msg.edit_text(f"✅ {fixed} ta sana ustuni tuzatildi! Endi statistikani qayta tekshiring.")
-        else:
-            await msg.edit_text("✅ Barcha sana ustunlari to'g'ri formatda edi.")
-    except Exception as e:
-        await msg.edit_text(f"❌ Xato: {e}")
-    with contextlib.suppress(Exception):
-        await message.delete()
-
-
 @router.message(Command("reklama_tozala"))
-async def cmd_cleanup_dupes(message: Message):
-    """Sheets dagi takroriy sana ustunlarini birlashtiradi va o'chiradi."""
+async def cmd_full_cleanup(message: Message):
+    """
+    Bitta buyruqda hammasi (avvalgi /reklama_sana_tuzat + /reklama_tozala
+    birlashtirildi): sana formatini tuzatadi, dublikat ustunlarni
+    birlashtiradi, eski oylarni "Mart 2026" kabi bitta ustunga
+    yig'adi, bo'sh ustunlarni o'chiradi.
+    """
     if not message.from_user or message.from_user.id != ADMIN_ID:
         return
-    msg = await message.answer("🧹 Dublikat ustunlar tekshirilmoqda...")
+    msg = await message.answer("🧹 To'liq tozalash boshlandi...")
     try:
-        loop    = asyncio.get_running_loop()
-        removed = await loop.run_in_executor(None, _cleanup_duplicate_cols_sync)
-        if removed:
-            await msg.edit_text(f"✅ {removed} ta dublikat ustun tozalandi!")
+        result = await run_full_maintenance()
+        if any(result.values()):
+            await msg.edit_text(
+                "✅ <b>Tozalash yakunlandi!</b>\n\n"
+                f"📅 Oylarga birlashtirildi: <b>{result['consolidated']}</b> ta\n"
+                f"🔁 Dublikat ustunlar birlashtirildi: <b>{result['duplicates_merged']}</b> ta\n"
+                f"🗑 Bo'sh ustunlar o'chirildi: <b>{result['empty_removed']}</b> ta",
+                parse_mode="HTML",
+            )
         else:
-            await msg.edit_text("✅ Dublikat ustun topilmadi.")
+            await msg.edit_text("✅ Hammasi allaqachon tartibda edi — o'zgarish kerak emas.")
     except Exception as e:
         await msg.edit_text(f"❌ Xato: {e}")
     with contextlib.suppress(Exception):
         await message.delete()
+
+
+@router.message(Command("reklama_sana_tuzat"))
+async def cmd_full_cleanup_alias(message: Message):
+    """Eski buyruq nomi — xuddi /reklama_tozala bilan bir xil ishlaydi (odat uchun qoldirilgan)."""
+    await cmd_full_cleanup(message)
 
 
 @router.message(Command("reklama_help"))
@@ -1452,6 +1660,12 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         id="monthly_check", replace_existing=True,
     )
 
+    sched.add_job(
+        lambda: asyncio.ensure_future(run_full_maintenance(bot)),
+        CronTrigger(hour=0, minute=20, timezone=TZ_STR),
+        id="full_maintenance", replace_existing=True,
+    )
+
     sched.start()
-    logger.info("Scheduler ishga tushdi — 7 ta trigger faol")
+    logger.info("Scheduler ishga tushdi — 8 ta trigger faol")
     return sched

@@ -1,8 +1,12 @@
 """
 Bot buyruqlari sozlamalari
 """
-from aiogram import Bot
-from aiogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
+from aiogram import Bot, Router, types
+from aiogram.filters import Command
+from aiogram.types import (
+    BotCommand, BotCommandScopeDefault, BotCommandScopeChat,
+    BotCommandScopeAllGroupChats,
+)
 import os
 import asyncio
 import base64
@@ -54,6 +58,29 @@ def _get_subadmin_ids() -> list[int]:
         return []
 
 
+# ─── DIAGNOSTIKA: guruhning haqiqiy chat_id sini ko'rsatadi ───────────
+# Guruhga yozib, /chatid buyrug'ini yuboring. .env dagi GROUP_ID bilan
+# solishtiring. Mos kelmasa — shu yer muammo manbai.
+
+diag_router = Router()
+
+@diag_router.message(Command("chatid"))
+async def cmd_chatid(message: types.Message):
+    actual_id     = message.chat.id
+    configured_id = GROUP_ID
+    match         = "✅ MOS KELADI" if actual_id == configured_id else "❌ MOS KELMAYDI!"
+    await message.answer(
+        f"🆔 <b>Chat ID diagnostikasi</b>\n\n"
+        f"Haqiqiy chat_id: <code>{actual_id}</code>\n"
+        f"Chat turi: <code>{message.chat.type}</code>\n"
+        f".env dagi GROUP_ID: <code>{configured_id}</code>\n\n"
+        f"{match}\n\n"
+        f"<i>Mos kelmasa, .env dagi GROUP_ID ni yuqoridagi "
+        f"haqiqiy qiymatga o'zgartiring va botni qayta ishga tushiring.</i>",
+        parse_mode="HTML",
+    )
+
+
 async def set_bot_commands(bot: Bot):
     # ── Buyruqlar ro'yxatlari ──────────────────────────────────────
     default_commands = [
@@ -68,20 +95,19 @@ async def set_bot_commands(bot: Bot):
     scoring_command = BotCommand(command="scoring", description="Scoring — qarz yuki hisoblash")
 
     admin_commands = [
-        BotCommand(command="kredit",               description="Kredit kalkulyator"),
-        BotCommand(command="job",                  description="Vakansiya qo'shish"),
-        BotCommand(command="chanel",               description="Majburiy obuna qo'shish"),
-        BotCommand(command="broadcast",            description="Ommaviy xabar yuborish"),
-        BotCommand(command="cleanup_users",        description="Foydalanuvchilar jadvalini tozalash"),
-        BotCommand(command="download",             description="Ma'lumot va fayllarni yuklab olish"),
-        BotCommand(command="sync_subadmin",        description="User dan sub_admin ga sinxronlash"),
-        BotCommand(command="reklama_stat",         description="Reklama statistikasi"),
-        BotCommand(command="reklama_sana_tuzat",   description="Reklama tuzatish"),
-        BotCommand(command="reklama_tozala",       description="Dublikat ustunlarni tozalash"),
-        BotCommand(command="filiallar",            description="Filiallar ro'yxati"),
-        BotCommand(command="refresh_branches",     description="Filiallarni yangilash"),
-        BotCommand(command="xabar",      description="Shaxsiy xabar yuborish"),
-        BotCommand(command="xabarlarim", description="Yuborilgan xabarlar ro'yxati"),
+        BotCommand(command="kredit",           description="Kredit kalkulyator"),
+        BotCommand(command="job",              description="Vakansiya qo'shish"),
+        BotCommand(command="chanel",           description="Majburiy obuna qo'shish"),
+        BotCommand(command="broadcast",        description="Ommaviy xabar yuborish"),
+        BotCommand(command="cleanup_users",    description="Foydalanuvchilar jadvalini tozalash"),
+        BotCommand(command="download",         description="Ma'lumot va fayllarni yuklab olish"),
+        BotCommand(command="reklama_stat",     description="Reklama statistikasi"),
+        BotCommand(command="sync_subadmin",    description="User dan sub_admin ga sinxronlash"),
+        BotCommand(command="reklama_tozala",   description="Oylarga birlashtirish + tozalash"),
+        BotCommand(command="filiallar",        description="Filiallar ro'yxati"),
+        BotCommand(command="refresh_branches", description="Filiallarni yangilash"),
+        BotCommand(command="guruhlar",         description="Bot admin bo'lgan guruhlar ro'yxati"),
+        BotCommand(command="guruhlar_tekshir", description="Guruhlar holatini qo'lda tekshirish"),
         scoring_command,
     ]
 
@@ -92,21 +118,32 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="reklama_users",   description="Foydalanuvchilar"),
         BotCommand(command="reklama_help",    description="Yordam"),
         BotCommand(command="reklama_reyting", description="Oylik reyting 🏆"),
+        BotCommand(command="chatid",          description="Chat ID diagnostikasi"),
     ]
 
     # Scoring + default — sub_adminlar va JOB_ID uchun
     subadmin_commands = default_commands + [scoring_command]
 
+    # Bot admin qilingan ISTALGAN guruhda ko'rinishi kerak — faqat
+    # GROUP_ID (asosiy Fortuna guruhi) emas, shuning uchun alohida
+    # BotCommandScopeAllGroupChats() ishlatiladi.
+    all_groups_commands = [
+        BotCommand(command="link_sozlama", description="Havola (reklama) nazorati sozlamasi"),
+    ]
+
     # ── O'rnatish ─────────────────────────────────────────────────
     await bot.set_my_commands(commands=default_commands, scope=BotCommandScopeDefault())
-    print("✅ Umumiy buyruqlar o'rnatildi")
+    logger.info("✅ Umumiy buyruqlar o'rnatildi")
 
     if ADMIN_ID:
-        await bot.set_my_commands(
-            commands=default_commands + admin_commands,
-            scope=BotCommandScopeChat(chat_id=ADMIN_ID)
-        )
-        print(f"✅ Admin buyruqlari o'rnatildi (ID: {ADMIN_ID})")
+        try:
+            await bot.set_my_commands(
+                commands=default_commands + admin_commands,
+                scope=BotCommandScopeChat(chat_id=ADMIN_ID)
+            )
+            logger.info(f"✅ Admin buyruqlari o'rnatildi (ID: {ADMIN_ID})")
+        except Exception as e:
+            logger.error(f"⚠️ Admin buyruqlarini o'rnatishda xato: {e}")
 
     if JOB_ID:
         try:
@@ -114,9 +151,9 @@ async def set_bot_commands(bot: Bot):
                 commands=subadmin_commands,
                 scope=BotCommandScopeChat(chat_id=JOB_ID)
             )
-            print(f"✅ JOB_ID buyruqlari o'rnatildi (ID: {JOB_ID})")
+            logger.info(f"✅ JOB_ID buyruqlari o'rnatildi (ID: {JOB_ID})")
         except Exception as e:
-            print(f"⚠️ JOB_ID buyruqlarini o'rnatishda xato: {e}")
+            logger.error(f"⚠️ JOB_ID buyruqlarini o'rnatishda xato: {e}")
 
     if GROUP_ID:
         try:
@@ -124,13 +161,31 @@ async def set_bot_commands(bot: Bot):
                 commands=group_commands,
                 scope=BotCommandScopeChat(chat_id=GROUP_ID)
             )
-            print(f"✅ Guruh buyruqlari o'rnatildi (ID: {GROUP_ID})")
+            logger.info(f"✅ Guruh buyruqlari o'rnatildi (ID: {GROUP_ID})")
         except Exception as e:
-            print(f"⚠️ Guruh buyruqlarini o'rnatishda xato: {e}")
+            # MUHIM: bu xato ko'pincha GROUP_ID noto'g'ri (masalan
+            # guruh supergruppaga aylanib, chat_id o'zgargan) bo'lganda
+            # chiqadi. "chat not found" xabari aynan shu sababdan.
+            logger.error(
+                f"⚠️ Guruh buyruqlarini o'rnatishda xato "
+                f"(GROUP_ID={GROUP_ID} noto'g'ri bo'lishi mumkin): {e}"
+            )
+    else:
+        logger.warning("⚠️ GROUP_ID sozlanmagan — guruh buyruqlari o'rnatilmadi")
+
+    try:
+        await bot.set_my_commands(
+            commands=all_groups_commands, scope=BotCommandScopeAllGroupChats()
+        )
+        logger.info("✅ /link_sozlama barcha guruhlar uchun o'rnatildi")
+    except Exception as e:
+        logger.error(f"⚠️ BotCommandScopeAllGroupChats o'rnatishda xato: {e}")
 
     # Sub_adminlar uchun alohida
     loop = asyncio.get_running_loop()
     subadmin_ids = await loop.run_in_executor(None, _get_subadmin_ids)
+    ok_count  = 0
+    err_count = 0
     for uid in subadmin_ids:
         if uid in (ADMIN_ID, JOB_ID):
             continue  # allaqachon o'rnatilgan
@@ -139,18 +194,19 @@ async def set_bot_commands(bot: Bot):
                 commands=subadmin_commands,
                 scope=BotCommandScopeChat(chat_id=uid)
             )
+            ok_count += 1
         except Exception as e:
+            err_count += 1
             logger.warning(f"Sub-admin {uid} buyruq o'rnatishda xato: {e}")
 
-    count = len(subadmin_ids)
-    print(f"✅ Sub-adminlar ({count} ta) uchun /scoring qo'shildi")
-    print("🎉 Barcha buyruqlar muvaffaqiyatli o'rnatildi!")
+    logger.info(f"✅ Sub-adminlar: {ok_count} muvaffaqiyatli, {err_count} xato")
+    logger.info("🎉 Barcha buyruqlar o'rnatish jarayoni yakunlandi!")
 
 
 async def remove_group_commands(bot: Bot):
     if GROUP_ID:
         try:
             await bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=GROUP_ID))
-            print(f"🗑 Guruh buyruqlari o'chirildi (ID: {GROUP_ID})")
+            logger.info(f"🗑 Guruh buyruqlari o'chirildi (ID: {GROUP_ID})")
         except Exception as e:
-            print(f"⚠️ Guruh buyruqlarini o'chirishda xato: {e}")
+            logger.error(f"⚠️ Guruh buyruqlarini o'chirishda xato: {e}")

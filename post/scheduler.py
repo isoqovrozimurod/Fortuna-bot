@@ -74,7 +74,6 @@ async def check_and_send_daily_news(bot: Bot):
 
     # Oxirgi linkni saqlab qo'yish
     save_last_posted_link(selected_article["link"])
-
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     """Schedulerni sozlash va vaqtini belgilash"""
     scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")

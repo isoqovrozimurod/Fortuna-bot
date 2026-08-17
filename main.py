@@ -39,6 +39,8 @@ from broadcast import router as broadcast_router
 from download import router as download_router
 from scoring import router as scoring_router
 from personal_message import router as personal_message_router
+from post.handlers import router as post_router
+from post.scheduler import setup_scheduler as setup_post_scheduler
 
 
 # =================== LOGGING ===================
@@ -126,6 +128,7 @@ def setup_dispatcher() -> Dispatcher:
     dp.include_router(broadcast_router)
     dp.include_router(scoring_router)
     dp.include_router(personal_message_router)
+    dp.include_router(post_router)
 
     return dp
 
@@ -192,9 +195,41 @@ async def main():
         refresh_lock_loop(redis, lock_key, lock_value, ttl=60)
     )
 
+    # scheduler = None
+    # with suppress(Exception):
+    #     scheduler = setup_scheduler(bot)
+
+    # try:
+    #     me = await bot.get_me()
+    #     logger.info(f"Bot ishga tushdi: @{me.username}")
+    # except Exception as e:
+    #     logger.warning(f"get_me xato: {e}")
+
+    # try:
+    #     await dp.start_polling(
+    #         bot,
+    #         allowed_updates=["message", "callback_query", "chat_member", "my_chat_member"]
+    #     )
+    # except TelegramConflictError:
+    #     logger.critical("Konflikt! Boshqa bot instansiyasi polling qilyapti. O'chirilmoqda...")
+    #     sys.exit(1)
+    # finally:
+    #     lock_task.cancel()
+    #     if scheduler:
+    #         with suppress(Exception):
+    #             scheduler.shutdown(wait=False)
+    #     with suppress(Exception):
+    #         await http_runner.cleanup()
+    #     with suppress(Exception):
+    #         await bot.session.close()
+
     scheduler = None
+    post_scheduler = None
     with suppress(Exception):
         scheduler = setup_scheduler(bot)
+    with suppress(Exception):
+        post_scheduler = setup_post_scheduler(bot)
+        post_scheduler.start()  # Post schedulerni ishga tushirish
 
     try:
         me = await bot.get_me()
@@ -215,11 +250,13 @@ async def main():
         if scheduler:
             with suppress(Exception):
                 scheduler.shutdown(wait=False)
+        if post_scheduler:
+            with suppress(Exception):
+                post_scheduler.shutdown(wait=False)  # Post schedulerni to'xtatish
         with suppress(Exception):
             await http_runner.cleanup()
         with suppress(Exception):
             await bot.session.close()
-
 
 if __name__ == "__main__":
     try:

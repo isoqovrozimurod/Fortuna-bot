@@ -16,12 +16,19 @@ async def oila_info(callback: CallbackQuery, bot: Bot):
         "– Chet elda ishlovchi jismoniy shaxs o'zi yoki yaqin qarindoshlariga (ota-ona yoki turmush o'rtog'i) ajratiladi\n"
         "- Kredit summasi: 10 mln so'mgacha\n"
         "- Muddati: 12 oy\n\n"
+        
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
         "  • O'zi yoki yaqin qarindoshining chet elda ishlashini asoslovchi hujjatlar\n"
         "  • Qarindoshlikni tasdiqlovchi hujjatlar(Nikoh guvohnomasi yoki my.gov.uz platformasidagi hujjatlar)\n"
         "  • Karta aylanmalari yoki xalqaro pul o'tkazmalari cheklari\n"
         "  • Patent (chet elda ishlovchi bo'lsa)\n"
-        "  • Boshqa zarur hujjatlar kredit mutaxassisi tomonidan ma'lum qilinadi.\n"
+        "  • Boshqa zarur hujjatlar kredit mutaxassisi tomonidan ma'lum qilinadi.\n\n"
+
+        "📞 <b>Murojaat uchun:</b>\n"
+        "📱 +998 99 251 00 40\n"
+        "📱 +998 95 375 45 40\n\n"
+        
+        "🤖 <b>Telegram bot:</b> @fortunakredit_bot"
     )
 
     markup = InlineKeyboardMarkup(inline_keyboard=[

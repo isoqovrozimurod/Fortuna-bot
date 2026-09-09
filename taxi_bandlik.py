@@ -6,9 +6,7 @@ import random
 
 router = Router()
 
-# Media papkasi
 MEDIA_DIR = os.path.join("temp", "taxi_bandlik")
-
 
 @router.callback_query(F.data == "taxi_bandlik")
 async def taxi_bandlik_info(callback: CallbackQuery, bot: Bot):
@@ -17,65 +15,66 @@ async def taxi_bandlik_info(callback: CallbackQuery, bot: Bot):
         "– Taksi faoliyati bilan shug'ullanuvchi shaxslarga\n"
         "– Kredit summasi: 15 000 000 so'mgacha\n"
         "– Kredit muddati: 12 oy\n\n"
-        
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
-        "• Shaxsni tasdiqlovchi hujjat(pasport, id karta)\n"
+        "• Shaxsni tasdiqlovchi hujjat (pasport, ID karta)\n"
         "• Texpasport (qarz oluvchi nomida bo'lgan mashina)\n"
         "• Sug'urta polisi\n"
         "• Bandlik guvohnomasi\n"
         "• Taksichilik faoliyati uchun berilgan litsenziya\n"
-        "• Onlayn taksi ilovalaridagi tushum va buyurtmalar(Yandex taxi, Best taxi va h.k.)\n\n"
-
+        "• Onlayn taksi ilovalaridagi tushum va buyurtmalar "
+        "(Yandex Taxi, Best Taxi va h.k.)\n\n"
         "📞 <b>Murojaat uchun:</b>\n"
         "📱 +998 99 251 00 40\n"
         "📱 +998 95 375 45 40\n\n"
-
-    "🤖 <b>Telegram bot:</b> @fortunakredit_bot"
+        "🤖 <b>Telegram bot:</b> @fortunakredit_bot"
     )
 
     markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_taxi_bandlik")],
-            [InlineKeyboardButton(text="⬅️ Ortga",            callback_data="credit_types")],
-        ])
-
-    # Papkadagi media fayllarni olish
-    media_files = [
-        os.path.join(MEDIA_DIR, file)
-        for file in os.listdir(MEDIA_DIR)
-        if file.lower().endswith(
-            (".mp4", ".mov", ".m4v", ".avi", ".mkv", ".png", ".jpg", ".jpeg", ".webp")
-        )
-    ]
+        [InlineKeyboardButton(text="📊 Kredit hisoblash", callback_data="calc_taxi_bandlik")],
+        [InlineKeyboardButton(text="⬅️ Ortga", callback_data="credit_types")]
+    ])
 
     if not os.path.exists(MEDIA_DIR):
         await callback.answer()
-        await callback.message.answer("❌ Media papka topilmadi.")
+        await callback.message.answer(f"❌ Media papka topilmadi.\n\n📁 {MEDIA_DIR}")
         return
 
-    # Random fayl tanlash
+    allowed_extensions = (".mp4", ".mov", ".m4v", ".avi", ".mkv", ".png", ".jpg", ".jpeg", ".webp")
+
+    media_files = [
+        os.path.join(MEDIA_DIR, file)
+        for file in os.listdir(MEDIA_DIR)
+        if file.lower().endswith(allowed_extensions)
+    ]
+
+    if not media_files:
+        await callback.answer()
+        await callback.message.answer("❌ Taxi-Bandlik uchun media fayl topilmadi.")
+        return
+
     selected_file = random.choice(media_files)
     media = FSInputFile(selected_file)
+    extension = os.path.splitext(selected_file)[1].lower()
 
     try:
-        # Video bo'lsa
-        if selected_file.lower().endswith(".mp4"):
+        if extension in (".mp4", ".mov", ".m4v", ".avi", ".mkv"):
             await callback.message.answer_video(
                 video=media,
                 caption=text,
                 reply_markup=markup,
                 parse_mode=ParseMode.HTML
             )
-
-        # Rasm bo'lsa
-        else:
+        elif extension in (".png", ".jpg", ".jpeg", ".webp"):
             await callback.message.answer_photo(
                 photo=media,
                 caption=text,
                 reply_markup=markup,
                 parse_mode=ParseMode.HTML
             )
+        else:
+            await callback.message.answer(f"❌ Noma'lum media formati: {extension}")
+            return
 
-        # Eski xabarni o'chirish
         try:
             await callback.message.delete()
         except Exception:
@@ -83,5 +82,6 @@ async def taxi_bandlik_info(callback: CallbackQuery, bot: Bot):
 
     except Exception as e:
         await callback.message.answer(
-            f"❌ Media yuborishda xatolik:\n{e}"
+            f"❌ Media yuborishda xatolik:\n\n<code>{str(e)}</code>",
+            parse_mode=ParseMode.HTML
         )

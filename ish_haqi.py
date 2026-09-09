@@ -17,10 +17,17 @@ async def show_pensiya_info(callback: CallbackQuery, bot: Bot):
     "• Kredit muddati: 12 – 36 oy\n"
     "• Kredit summasi: 3 – 40 mln so'mgacha\n"
     "• Kafil asosida: 20 – 40 mln so'mgacha\n\n"
+        
     "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
         "  • Pasport\n"
         "  • Ish haqi plastik kartasi\n"
-        "  • <i>(Harbiylar uchun ish joyidan ish haqi ma'lumotnomasi)</i>\n"
+        "  • <i>(Harbiylar uchun ish joyidan ish haqi ma'lumotnomasi)</i>\n/n"
+
+        "📞 <b>Murojaat uchun:</b>\n"
+        "📱 +998 99 251 00 40\n"
+        "📱 +998 95 375 45 40\n\n"
+        
+        "🤖 <b>Telegram bot:</b> @fortunakredit_bot"
 )
 
     markup = InlineKeyboardMarkup(inline_keyboard=[

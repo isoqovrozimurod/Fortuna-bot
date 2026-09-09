@@ -16,10 +16,17 @@ async def avto_drive_info(callback: CallbackQuery, bot: Bot):
         "– Shaxsiy avtomobilga ega jismoniy shaxslarga\n"
         "– Kredit summasi: 10 000 000 so'mgacha\n"
         "– Kredit muddati: 12 oy\n\n"
+        
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
         "1. Shaxsni tasdiqlovchi hujjat(pasport, id karta)\n"
         "2. Texpasport (qarz oluvchi nomida bo'lgan mashina)\n"
-        "3. Sug'urta polisi\n"
+        "3. Sug'urta polisi\n\n"
+
+        "📞 <b>Murojaat uchun:</b>\n"
+        "📱 +998 99 251 00 40\n"
+        "📱 +998 95 375 45 40\n\n"
+        
+        "🤖 <b>Telegram bot:</b> @fortunakredit_bot"
     )
 
     markup = InlineKeyboardMarkup(inline_keyboard=[

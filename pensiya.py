@@ -17,10 +17,16 @@ async def show_pensiya_info(callback: CallbackQuery, bot: Bot):
         "– Pensiya miqdori 750 000 soʻmdan kam boʻlmasligi kerak\n"
         "– Kredit muddati: 12 – 24 oy\n"
         "– Kredit summasi: 3 – 30 mln soʻmgacha\n\n"
+        
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
         "  • Pasport\n"
-        "  • Pensiya plastik kartasi\n"
+        "  • Pensiya plastik kartasi\n\n"
         
+        "📞 <b>Murojaat uchun:</b>\n"
+        "📱 +998 99 251 00 40\n"
+        "📱 +998 95 375 45 40\n\n"
+        
+        "🤖 <b>Telegram bot:</b> @fortunakredit_bot"
     )
 
     markup = InlineKeyboardMarkup(inline_keyboard=[

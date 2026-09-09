@@ -199,39 +199,14 @@ async def main():
     lock_task = asyncio.create_task(
         refresh_lock_loop(redis, lock_key, lock_value, ttl=60)
     )
-
-    # scheduler = None
-    # with suppress(Exception):
-    #     scheduler = setup_scheduler(bot)
-
-    # try:
-    #     me = await bot.get_me()
-    #     logger.info(f"Bot ishga tushdi: @{me.username}")
-    # except Exception as e:
-    #     logger.warning(f"get_me xato: {e}")
-
-    # try:
-    #     await dp.start_polling(
-    #         bot,
-    #         allowed_updates=["message", "callback_query", "chat_member", "my_chat_member"]
-    #     )
-    # except TelegramConflictError:
-    #     logger.critical("Konflikt! Boshqa bot instansiyasi polling qilyapti. O'chirilmoqda...")
-    #     sys.exit(1)
-    # finally:
-    #     lock_task.cancel()
-    #     if scheduler:
-    #         with suppress(Exception):
-    #             scheduler.shutdown(wait=False)
-    #     with suppress(Exception):
-    #         await http_runner.cleanup()
-    #     with suppress(Exception):
-    #         await bot.session.close()
-
+    
     scheduler = None
+    control_scheduler = None
     post_scheduler = None
     with suppress(Exception):
         scheduler = setup_scheduler(bot)
+    with suppress(Exception):
+        control_scheduler = setup_control_scheduler(bot)
     with suppress(Exception):
         post_scheduler = setup_post_scheduler(bot)
         post_scheduler.start()  # Post schedulerni ishga tushirish
@@ -255,6 +230,9 @@ async def main():
         if scheduler:
             with suppress(Exception):
                 scheduler.shutdown(wait=False)
+        if control_scheduler:
+            with suppress(Exception):
+                control_scheduler.shutdown(wait=False)
         if post_scheduler:
             with suppress(Exception):
                 post_scheduler.shutdown(wait=False)  # Post schedulerni to'xtatish
@@ -262,6 +240,7 @@ async def main():
             await http_runner.cleanup()
         with suppress(Exception):
             await bot.session.close()
+
 
 if __name__ == "__main__":
     try:

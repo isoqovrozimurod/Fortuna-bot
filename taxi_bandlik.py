@@ -36,7 +36,7 @@ async def taxi_bandlik_info(callback: CallbackQuery, bot: Bot):
         os.path.join(MEDIA_DIR, file)
         for file in os.listdir(MEDIA_DIR)
         if file.lower().endswith(
-            (".mp4", ".png", ".jpg", ".jpeg")
+            (".mp4", ".mov", ".m4v", ".avi", ".mkv", ".png", ".jpg", ".jpeg", ".webp")
         )
     ]
 

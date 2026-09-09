@@ -339,18 +339,32 @@ async def cb_ish_joyi(call: CallbackQuery, state: FSMContext):
         await call.message.edit_text("❌ Scoring bekor qilindi.")
         return
 
-    ish_joyi_map = {"sc_budjet": "budjet", "sc_xususiy": "xususiy"}
+    ish_joyi_map = {
+        "sc_budjet": "budjet",
+        "sc_xususiy": "xususiy"
+    }
+
     ish_joyi = ish_joyi_map.get(call.data)
     if not ish_joyi:
         return
 
     await state.update_data(ish_joyi=ish_joyi)
     await call.answer()
+
+    min_s = 3_000_000
+    max_s = 40_000_000 if ish_joyi == "budjet" else 20_000_000
+
+    await state.update_data(
+        min_summa=min_s,
+        max_summa=max_s
+    )
+
     await state.set_state(ScoringFSM.kredit_summasi)
-    min_s, max_s = 3_000_000, 40_000_000
-    await state.update_data(min_summa=min_s, max_summa=max_s)
+
     await call.message.edit_text(
-        f"✅ Muddat: <b>{term} oy</b>\n\n{daromad_prompt}",
+        f"💰 Mijoz olmoqchi bo'lgan kredit summasini kiriting (so'mda):\n"
+        f"📌 Minimal: <b>{fmt(min_s)}</b> | "
+        f"Maksimal: <b>{fmt(max_s)}</b>",
         reply_markup=cancel_kb(),
         parse_mode="HTML",
     )

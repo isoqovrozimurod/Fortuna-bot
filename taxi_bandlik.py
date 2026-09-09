@@ -17,13 +17,20 @@ async def taxi_bandlik_info(callback: CallbackQuery, bot: Bot):
         "– Taksi faoliyati bilan shug'ullanuvchi shaxslarga\n"
         "– Kredit summasi: 15 000 000 so'mgacha\n"
         "– Kredit muddati: 12 oy\n\n"
+        
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
         "• Shaxsni tasdiqlovchi hujjat(pasport, id karta)\n"
         "• Texpasport (qarz oluvchi nomida bo'lgan mashina)\n"
         "• Sug'urta polisi\n"
         "• Bandlik guvohnomasi\n"
         "• Taksichilik faoliyati uchun berilgan litsenziya\n"
-        "• Onlayn taksi ilovalaridagi tushum va buyurtmalar(Yandex taxi, Best taxi va h.k.)\n"
+        "• Onlayn taksi ilovalaridagi tushum va buyurtmalar(Yandex taxi, Best taxi va h.k.)\n\n"
+
+        "📞 <b>Murojaat uchun:</b>\n"
+        "📱 +998 99 251 00 40\n"
+        "📱 +998 95 375 45 40\n\n"
+
+    "🤖 <b>Telegram bot:</b> @fortunakredit_bot"
     )
 
     markup = InlineKeyboardMarkup(inline_keyboard=[

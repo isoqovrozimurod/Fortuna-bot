@@ -17,10 +17,17 @@ async def biznes_info(callback: CallbackQuery, bot: Bot):
         "- Tashkilotimizdan birinchi marta kredit olayotgan Budjet tashkilotlari xodimlari uchun\n"
         "- Dastlabki 30 kun foizsiz"
         "- Kredit muddati: 12 oy\n"
+        
         "- Kredit summasi: 3 - 20 mln so'mgacha\n\n"
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
         "  • Pasport\n"
-        "  • Ish haqi plastik kartasi\n"
+        "  • Ish haqi plastik kartasi\n\n"
+
+        "📞 <b>Murojaat uchun:</b>\n"
+        "📱 +998 99 251 00 40\n"
+        "📱 +998 95 375 45 40\n\n"
+        
+        "🤖 <b>Telegram bot:</b> @fortunakredit_bot"
     )
 
     markup = InlineKeyboardMarkup(

@@ -996,11 +996,19 @@ def _stat_kb() -> InlineKeyboardMarkup:
 
 @router.message(Command("reklama_stat"))
 async def cmd_stat(message: Message, bot: Bot):
-    """Statistika menyusini adminga shaxsan yuboradi."""
+    """
+    Statistika menyusini yuboradi.
+
+    TUZATILDI: avval javob har doim ADMIN_ID (shaxsiy chat) ga qattiq
+    yozilgan edi — guruhda /reklama_stat yuborilsa ham, natija adminning
+    shaxsiy chatiga ketardi. Endi javob buyruq QAYERDAN kelsa o'sha
+    yerga (message.chat.id) boradi: guruhda so'ralsa — guruhda,
+    shaxsiy chatda so'ralsa — shaxsiy chatda chiqadi.
+    """
     if not message.from_user or message.from_user.id != ADMIN_ID:
         return
     await bot.send_message(
-        ADMIN_ID,
+        message.chat.id,
         "📊 <b>Reklama statistikasi</b>\n\nQaysi davrni ko'rmoqchisiz?",
         reply_markup=_stat_kb(), parse_mode="HTML",
     )
@@ -1011,7 +1019,12 @@ async def cmd_stat(message: Message, bot: Bot):
 @router.callback_query(F.data.in_({"stat_daily", "stat_weekly", "stat_monthly",
                                     "stat_rating", "stat_close"}))
 async def cb_stat(call: CallbackQuery):
-    """Statistika tugmalarini qayta ishlaydi."""
+    """
+    Statistika tugmalarini qayta ishlaydi.
+    edit_text() har doim xabar TURGAN chatda ishlaydi — shuning uchun
+    bu handler allaqachon to'g'ri (guruhda bosilsa guruhda, shaxsiyda
+    bosilsa shaxsiyda yangilanadi), qo'shimcha tuzatish shart emas edi.
+    """
     if call.from_user.id != ADMIN_ID:
         await call.answer("❌ Ruxsat yo'q!", show_alert=True)
         return
@@ -1534,7 +1547,7 @@ async def cmd_help(message: Message):
         "/reklama_users — Faol xodimlar (progress bar)\n"
         "/sync_subadmin — User → sub_admin sinxronlash\n"
         "/reklama_tozala — Dublikat ustunlarni tozalash 🧹\n\n"
-        "<b>Avtomatik (Apps Script):</b>\n"
+        "<b>Avtomatik:</b>\n"
         "⏰ 09:30, 15:00 — Nazorat + progress bar\n"
         "🕛 12:00 — Tushlik nazorati\n"
         "📆 Har dushanba 09:00 — Haftalik reyting\n"
@@ -1614,6 +1627,7 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
       18:00        — Bugungi statistika
       Dushanba 09:00 — Haftalik statistika
       Har kuni 09:05 — Oylik reyting (faqat 1-sana)
+      Har kuni 00:20 — To'liq tozalash (oylik birlashtirish va h.k.)
     """
     TZ_STR = "Asia/Tashkent"
     sched  = AsyncIOScheduler(timezone=TZ_STR)

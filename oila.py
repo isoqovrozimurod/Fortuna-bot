@@ -24,7 +24,7 @@ async def oila_info(callback: CallbackQuery, bot: Bot):
         "  • Patent (chet elda ishlovchi bo'lsa)\n"
         "  • Boshqa zarur hujjatlar kredit mutaxassisi tomonidan ma'lum qilinadi.\n\n"
 
-        "📞 <b>Murojaat uchun:</b>\n"
+        "<b>Murojaat uchun:</b>\n"
         "📱 +998 99 251 00 40\n"
         "📱 +998 95 375 45 40\n\n"
         

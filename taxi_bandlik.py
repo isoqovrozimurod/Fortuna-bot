@@ -25,7 +25,7 @@ async def taxi_bandlik_info(callback: CallbackQuery, bot: Bot):
         "• Onlayn taksi ilovalaridagi tushum va buyurtmalar "
         "(Yandex Taxi, Best Taxi va h.k.)\n\n"
         
-        "📞 <b>Murojaat uchun:</b>\n"
+        "<b>Murojaat uchun:</b>\n"
         "📱 +998 99 251 00 40\n"
         "📱 +998 95 375 45 40\n\n"
         

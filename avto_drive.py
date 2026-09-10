@@ -22,7 +22,7 @@ async def avto_drive_info(callback: CallbackQuery, bot: Bot):
         "2. Texpasport (qarz oluvchi nomida bo'lgan mashina)\n"
         "3. Sug'urta polisi\n\n"
 
-        "📞 <b>Murojaat uchun:</b>\n"
+        "<b>Murojaat uchun:</b>\n"
         "📱 +998 99 251 00 40\n"
         "📱 +998 95 375 45 40\n\n"
         

@@ -22,7 +22,7 @@ async def show_pensiya_info(callback: CallbackQuery, bot: Bot):
         "  • Pasport\n"
         "  • Pensiya plastik kartasi\n\n"
         
-        "📞 <b>Murojaat uchun:</b>\n"
+        "<b>Murojaat uchun:</b>\n"
         "📱 +998 99 251 00 40\n"
         "📱 +998 95 375 45 40\n\n"
         

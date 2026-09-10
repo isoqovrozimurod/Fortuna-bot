@@ -24,7 +24,7 @@ async def biznes_info(callback: CallbackQuery, bot: Bot):
         "  • STIR (INN)\n"
         "  • Ijara shartnomasi\n"
         "  • Biznes faoliyatini tasdiqlovchi hujjatlar\n"
-        "  • Kafil talab qilinadi\n"
+        "  • Kafil talab qilinadi\n\n"
 
         "📞 <b>Murojaat uchun:</b>\n"
         "📱 +998 99 251 00 40\n"

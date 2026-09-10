@@ -23,7 +23,7 @@ async def show_pensiya_info(callback: CallbackQuery, bot: Bot):
         "  • Ish haqi plastik kartasi\n"
         "  • <i>(Harbiylar uchun ish joyidan ish haqi ma'lumotnomasi)</i>\n/n"
 
-        "📞 <b>Murojaat uchun:</b>\n"
+        "<b>Murojaat uchun:</b>\n"
         "📱 +998 99 251 00 40\n"
         "📱 +998 95 375 45 40\n\n"
         

@@ -26,7 +26,7 @@ async def biznes_info(callback: CallbackQuery, bot: Bot):
         "  • Biznes faoliyatini tasdiqlovchi hujjatlar\n"
         "  • Kafil talab qilinadi\n\n"
 
-        "📞 <b>Murojaat uchun:</b>\n"
+        "<b>Murojaat uchun:</b>\n"
         "📱 +998 99 251 00 40\n"
         "📱 +998 95 375 45 40\n\n"
         

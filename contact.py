@@ -19,7 +19,8 @@ CONTACT_TEXT = (
     "📱+998992510040      24/7⏳\n"
     "☎️+998724321500\n"
     "📱+998953754540      24/7⏳\n"
-    "@Gallaorol_FB"
+    "<b>Telegram:</b> @Gallaorol_FB\n\n"
+    "🤖 <b>Telegram bot:</b> @fortunakredit_bot"
 )
 # Ortga tugmasi
 back_markup = InlineKeyboardMarkup(

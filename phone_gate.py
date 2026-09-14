@@ -10,8 +10,11 @@ import asyncio
 
 from aiogram import Router, F, Bot, BaseMiddleware
 from aiogram.types import (
-    Message, CallbackQuery,
-    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    Message,
+    CallbackQuery,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardRemove,
 )
 
 from broadcast import save_user, user_has_phone
@@ -26,7 +29,10 @@ PROMPT_TEXT = (
     "Quyidagi tugmani bosib, raqamingizni ulashing:"
 )
 
+# Bir marta tasdiqlangan foydalanuvchilar shu yerda saqlanadi.
 _verified_cache: set[int] = set()
+
+# Bir foydalanuvchi kontaktini parallel qayta ishlashni oldini oladi.
 _processing_users: set[int] = set()
 _processing_lock = asyncio.Lock()
 
@@ -34,10 +40,12 @@ _processing_lock = asyncio.Lock()
 def _phone_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(
-                text="📱 Raqamni ulashish",
-                request_contact=True,
-            )]
+            [
+                KeyboardButton(
+                    text="📱 Raqamni ulashish",
+                    request_contact=True,
+                )
+            ]
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
@@ -47,7 +55,9 @@ def _phone_kb() -> ReplyKeyboardMarkup:
 async def _is_verified_safe(user_id: int) -> bool:
     """
     Telefon tasdiqlanganini tekshiradi.
-    Sheets ishlamasa — foydalanuvchini vaqtincha bloklamaydi.
+
+    Sheets vaqtincha ishlamasa, allaqachon mavjud foydalanuvchini
+    tasodifan bloklab qo'ymaslik uchun fail-open ishlaydi.
     """
     if user_id in _verified_cache:
         return True
@@ -56,7 +66,8 @@ async def _is_verified_safe(user_id: int) -> bool:
         verified = await user_has_phone(user_id)
     except Exception as e:
         logger.error(
-            f"phone_gate: tekshiruvda xato — bloklanmaydi: {e}"
+            f"phone_gate: telefon tekshirishda xato — "
+            f"bloklanmaydi: {e}"
         )
         return True
 
@@ -67,13 +78,14 @@ async def _is_verified_safe(user_id: int) -> bool:
 
 
 def mark_verified(user_id: int) -> None:
-    """Foydalanuvchini tasdiqlangan holatda cache'ga qo'shadi."""
+    """Foydalanuvchini tasdiqlanganlar cache'iga qo'shadi."""
     _verified_cache.add(user_id)
 
 
 class PhoneGateMiddleware(BaseMiddleware):
     """
     Har bir shaxsiy xabar/callback uchun telefon tasdig'ini tekshiradi.
+
     Guruhlar, admin va kontakt xabarining o'zi tekshirilmaydi.
     """
 
@@ -101,6 +113,7 @@ class PhoneGateMiddleware(BaseMiddleware):
             if ADMIN_ID and user.id == ADMIN_ID:
                 return await handler(event, data)
 
+            # Kontaktning o'zi on_contact_shared handleriga o'tadi.
             if isinstance(event, Message) and event.contact:
                 return await handler(event, data)
 
@@ -109,6 +122,7 @@ class PhoneGateMiddleware(BaseMiddleware):
 
             text = event.text or "" if isinstance(event, Message) else ""
 
+            # Foydalanuvchi /start qilganda ism/username'ni saqlaymiz.
             if isinstance(event, Message) and text.startswith("/start"):
                 with contextlib.suppress(Exception):
                     await save_user(
@@ -134,7 +148,8 @@ class PhoneGateMiddleware(BaseMiddleware):
 
         except Exception as e:
             logger.error(
-                f"phone_gate middleware xato — o'tkazib yuborildi: {e}"
+                f"phone_gate middleware xato — "
+                f"o'tkazib yuborildi: {e}"
             )
             return await handler(event, data)
 
@@ -148,8 +163,8 @@ async def on_contact_shared(message: Message, bot: Bot) -> None:
     if not user:
         return
 
-    # Bir foydalanuvchining kontaktini bir vaqtning o'zida
-    # ikki marta qayta ishlashga yo'l qo'ymaymiz.
+    # Bir foydalanuvchidan bir vaqtning o'zida kelgan
+    # ikkinchi kontaktni qayta ishlamaymiz.
     async with _processing_lock:
         if user.id in _processing_users:
             await message.answer(
@@ -160,10 +175,22 @@ async def on_contact_shared(message: Message, bot: Bot) -> None:
         _processing_users.add(user.id)
 
     try:
+        # Faqat foydalanuvchining o'z raqami qabul qilinadi.
         if contact.user_id and contact.user_id != user.id:
             await message.answer(
-                "⚠️ Bu boshqa odamning kontakti. Iltimos, "
-                "<b>faqat o'zingizning</b> raqamingizni yuboring.",
+                "⚠️ Bu boshqa odamning kontakti. "
+                "Iltimos, <b>faqat o'zingizning</b> raqamingizni yuboring.",
+                reply_markup=_phone_kb(),
+                parse_mode="HTML",
+            )
+            return
+
+        phone = contact.phone_number or ""
+
+        if not phone:
+            await message.answer(
+                "❌ Telefon raqami aniqlanmadi. "
+                "Iltimos, qaytadan yuboring.",
                 reply_markup=_phone_kb(),
                 parse_mode="HTML",
             )
@@ -174,14 +201,14 @@ async def on_contact_shared(message: Message, bot: Bot) -> None:
             user_id=user.id,
             full_name=user.full_name or "",
             username=user.username or "",
-            phone=contact.phone_number or "",
+            phone=phone,
         )
 
         # Sheets'ga yozish muvaffaqiyatsiz bo'lsa,
-        # foydalanuvchini tasdiqlangan deb belgilamaymiz.
+        # foydalanuvchini tasdiqlangan deb hisoblamaymiz.
         if not saved:
             logger.error(
-                f"phone_gate: telefonni Sheets'ga yozib bo'lmadi "
+                f"phone_gate: telefon Sheets'ga yozilmadi "
                 f"(user_id={user.id})"
             )
 
@@ -193,7 +220,7 @@ async def on_contact_shared(message: Message, bot: Bot) -> None:
             )
             return
 
-        # Faqat Sheets muvaffaqiyatli yozilgandan keyin tasdiqlaymiz.
+        # Faqat muvaffaqiyatli yozilgandan keyin tasdiqlaymiz.
         mark_verified(user.id)
 
         await message.answer(
@@ -202,11 +229,29 @@ async def on_contact_shared(message: Message, bot: Bot) -> None:
             parse_mode="HTML",
         )
 
-        # Keyingi jarayon faqat yuqoridagi yozuv muvaffaqiyatli
-        # tugagandan keyin bajariladi.
-        with contextlib.suppress(Exception):
+        # Keyingi jarayon faqat Sheets yozuvi muvaffaqiyatli
+        # tugagandan keyin ishga tushadi.
+        try:
             from start import send_promo
             await send_promo(bot, user.id)
+        except Exception as e:
+            logger.error(
+                f"phone_gate: send_promo xatosi "
+                f"(user_id={user.id}): {e}"
+            )
+
+    except Exception as e:
+        logger.error(
+            f"phone_gate: kontaktni qayta ishlashda xato "
+            f"(user_id={user.id}): {e}"
+        )
+
+        await message.answer(
+            "❌ Telefon raqamingizni tasdiqlashda xatolik yuz berdi.\n\n"
+            "Iltimos, qayta urinib ko'ring.",
+            reply_markup=_phone_kb(),
+            parse_mode="HTML",
+        )
 
     finally:
         async with _processing_lock:

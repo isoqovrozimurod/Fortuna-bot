@@ -150,7 +150,21 @@ def _search_users(users: list[dict], query: str) -> list[dict]:
 
 # ── Kampaniyalar (yuborilgan xabarlar) xotirasi ─────────────────────────
 # {campaign_id: {"recipients": {user_id: message_id}, "created": datetime}}
+#
+# MUHIM: bu dict avval CHEKSIZ o'sardi — har bir yuborilgan xabar
+# uchun yangi yozuv qo'shilib, hech qachon tozalanmasdi (xotira
+# oqishi). Endi eng eski yozuvlar avtomatik olib tashlanadi.
+# Telegram baribir 48 soatdan eski xabarni o'chirishga ruxsat bermaydi,
+# shuning uchun juda eski kampaniyalarni saqlashning ma'nosi ham yo'q.
+MAX_CAMPAIGNS = 50
 _campaigns: dict[str, dict] = {}
+
+
+def _trim_campaigns() -> None:
+    """Eng eski kampaniyalarni olib tashlaydi (xotira oqishining oldini oladi)."""
+    while len(_campaigns) > MAX_CAMPAIGNS:
+        oldest = min(_campaigns, key=lambda k: _campaigns[k]["created"])
+        _campaigns.pop(oldest, None)
 
 
 # ── FSM ──────────────────────────────────────────────────────────────────
@@ -458,6 +472,7 @@ async def pm_contact_btn(call: CallbackQuery):
         await call.message.edit_text(
             "👤 <b>Qabul qiluvchini qayerdan tanlaysiz?</b>\n\n"
             "📱 Telefoningiz kontakt daftaridan\n"
+            "💬 Telegramdagi shaxsiy chatlaringizdan\n"
             "📋 Bizning botda ro'yxatdan o'tgan foydalanuvchilar ro'yxatidan",
             reply_markup=_contact_choice_kb(), parse_mode="HTML",
         )
@@ -799,6 +814,9 @@ async def pm_send(call: CallbackQuery, state: FSMContext, bot: Bot):
         except Exception as e:
             fail += 1
             logger.warning(f"Xabar yuborilmadi ({r['id']}): {e}")
+        # Telegram flood-limitiga tushmaslik uchun kichik pauza
+        # (broadcast.py da ham xuddi shunday qilingan).
+        await asyncio.sleep(0.05)
 
     campaign_id = secrets.token_hex(4)
     _campaigns[campaign_id] = {
@@ -806,6 +824,7 @@ async def pm_send(call: CallbackQuery, state: FSMContext, bot: Bot):
         "recipients": sent_map,
         "created":    datetime.now(),
     }
+    _trim_campaigns()
 
     with contextlib.suppress(Exception):
         await call.message.edit_text(
@@ -859,9 +878,21 @@ async def pmc_delete(call: CallbackQuery, bot: Bot):
             fail += 1
             logger.warning(f"O'chirishda xato ({uid}): {e}")
 
+    # MUHIM: avval kampaniya HAR DOIM xotiradan o'chirilardi — hatto
+    # bitta ham xabar o'chmagan bo'lsa ham. Natijada admin qayta urinib
+    # ko'ra olmasdi. Endi kamida bittasi o'chgan bo'lsagina olib
+    # tashlanadi; aks holda kampaniya joyida qoladi.
+    if ok:
+        _campaigns.pop(campaign_id, None)
+        note = f"🗑 O'chirildi: {ok} ta, xato: {fail} ta"
+    else:
+        note = (
+            f"⚠️ Hech biri o'chirilmadi ({fail} ta xato).\n\n"
+            f"<i>Telegram 48 soatdan eski xabarlarni o'chirishga ruxsat "
+            f"bermaydi. Kampaniya saqlab qolindi — qayta urinib ko'rishingiz mumkin.</i>"
+        )
     with contextlib.suppress(Exception):
-        await call.message.edit_text(f"🗑 O'chirildi: {ok} ta, xato: {fail} ta")
-    del _campaigns[campaign_id]
+        await call.message.edit_text(note, parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("pmc_edit_"))

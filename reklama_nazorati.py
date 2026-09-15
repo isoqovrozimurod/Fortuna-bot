@@ -51,8 +51,20 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-BASE_COLS    = 8   # T/r, Telegram ID, Username, Ism, Familiya, Telefon, Sana, Holati
-DAILY_TARGET = 2   # Kunlik maqsad (screenshot soni)
+# MUHIM: sub_adminlar varag'iga "Birthday" ustuni qo'shilgandan keyin
+# asosiy ustunlar soni 8 dan 9 ga oshdi:
+#   A T/r | B Telegram ID | C Username | D Ism | E Familiya |
+#   F Telefon raqami | G Qo'shilgan sana | H Holati | I Birthday
+# Sana ustunlari endi J (10-ustun) dan boshlanadi.
+#
+# Agar bu 8 bo'lib qolsa, full_sheet_maintenance_sync() "Birthday" ni
+# raqamli sana-ustuni deb hisoblab, qiymatlari raqam emasligi uchun
+# butun ustunni bo'shatadi, keyin "bo'sh ustun" deb O'CHIRIB YUBORADI.
+BASE_COLS      = 9
+BIRTHDAY_COL   = "Birthday"   # Sheets dagi ustun sarlavhasi
+
+DAILY_TARGET    = 2   # Oddiy kunlik maqsad (screenshot soni)
+BIRTHDAY_TARGET = 3   # Tug'ilgan kunida — reja 3 ta
 
 # Oylik birlashtirish uchun: oy tugaganidan keyin necha kun kutiladi
 MONTH_CONSOLIDATE_GRACE_DAYS = 5
@@ -83,6 +95,129 @@ def _is_month_over_grace(year: int, month: int, today: date,
     """Oy tugaganidan keyin grace_days kun o'tganmi."""
     last_day = date(year, month, calendar.monthrange(year, month)[1])
     return (today - last_day).days >= grace_days
+
+
+# ─── TUG'ILGAN KUN ────────────────────────────────────────────────────────────
+
+def _parse_birthday(raw) -> date | None:
+    """
+    Birthday katagini date obyektiga aylantiradi.
+    '26.12.2000' asosiy format, lekin Sheets lokalizatsiyaga qarab
+    boshqacha ko'rsatishi mumkin — shuning uchun bir nechta format sinaladi.
+    """
+    txt = str(raw or "").strip()
+    if not txt:
+        return None
+    for fmt in ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(txt, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _is_birthday_today(raw, today: datetime | None = None) -> bool:
+    """Shu katakdagi tug'ilgan kun bugunga to'g'ri keladimi (yil hisobga olinmaydi)."""
+    bd = _parse_birthday(raw)
+    if not bd:
+        return False
+    t = today or now_tz()
+    return (bd.month, bd.day) == (t.month, t.day)
+
+
+def _target_for_record(rec: dict, today: datetime | None = None) -> int:
+    """
+    Shu xodim uchun BUGUNGI reja: tug'ilgan kuni bo'lsa 3, aks holda 2.
+    Sheets yozuvi (_safe_records natijasi) asosida ishlaydi — qo'shimcha
+    API chaqiruvi talab qilmaydi.
+    """
+    return BIRTHDAY_TARGET if _is_birthday_today(rec.get(BIRTHDAY_COL, ""), today) else DAILY_TARGET
+
+
+# Bugungi tug'ilgan kun egalarining ID lari — handle_media har bir rasm
+# uchun Sheets ga murojaat qilmasligi uchun kunlik keshlanadi.
+_birthday_cache: dict = {"date": "", "ids": set()}
+
+
+def _birthday_people_sync() -> list[dict]:
+    """Bugun tug'ilgan kuni bo'lgan (va chiqib ketmagan) xodimlar ro'yxati."""
+    data   = _safe_records(_ws())
+    today  = now_tz()
+    result = []
+    for r in data:
+        if str(r.get("Holati", "")).strip() == "Chiqib ketdi":
+            continue
+        tg_id = str(r.get("Telegram ID", "")).strip()
+        if not tg_id:
+            continue
+        bd = _parse_birthday(r.get(BIRTHDAY_COL, ""))
+        if bd and (bd.month, bd.day) == (today.month, today.day):
+            name = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
+            age  = today.year - bd.year if bd.year > 1900 else None
+            result.append({"id": tg_id, "name": name, "age": age})
+    return result
+
+
+async def _today_birthday_ids() -> set[int]:
+    """Bugungi tug'ilgan kun egalari ID lari (kunlik keshlanadi)."""
+    key = today_str()
+    if _birthday_cache.get("date") == key:
+        return _birthday_cache.get("ids", set())
+    try:
+        loop   = asyncio.get_running_loop()
+        people = await loop.run_in_executor(None, _birthday_people_sync)
+    except Exception as e:
+        logger.error(f"Tug'ilgan kunlarni o'qishda xato: {e}")
+        return set()   # xato bo'lsa — keshlamaymiz, oddiy reja ishlaydi
+    ids = set()
+    for p in people:
+        try:
+            ids.add(int(float(p["id"])))
+        except (ValueError, TypeError):
+            pass
+    _birthday_cache["date"] = key
+    _birthday_cache["ids"]  = ids
+    return ids
+
+
+async def _target_for_user(user_id: int) -> int:
+    """Shu foydalanuvchi uchun bugungi reja (tug'ilgan kunida 3)."""
+    return BIRTHDAY_TARGET if user_id in await _today_birthday_ids() else DAILY_TARGET
+
+
+async def send_birthday_greetings(bot: Bot) -> None:
+    """
+    Bugun tug'ilgan kuni bo'lganlarni guruhda tabriklaydi va
+    ularning bugungi rejasi 3 ta ekanini eslatadi.
+    """
+    if GROUP_ID == 0:
+        return
+    try:
+        loop   = asyncio.get_running_loop()
+        people = await loop.run_in_executor(None, _birthday_people_sync)
+    except Exception as e:
+        logger.error(f"Tug'ilgan kun tabrigi — Sheets xato: {e}")
+        return
+
+    if not people:
+        return
+
+    for p in people:
+        yosh = f" — <b>{p['age']}</b> yosh!" if p.get("age") else "!"
+        text = (
+            f"🎂 <b>TUG'ILGAN KUN MUBORAK!</b>\n\n"
+            f"🎉 {_mention(p['id'], p['name'])}{yosh}\n\n"
+            f"Jamoamiz nomidan sizni chin qalbdan tabriklaymiz! "
+            f"Sog'lik, baxt va katta yutuqlar tilaymiz. 🌟\n\n"
+            f"➖➖➖➖➖➖➖➖➖➖\n"
+            f"📸 Bugungi reja: <b>{BIRTHDAY_TARGET} ta</b> screenshot"
+        )
+        with contextlib.suppress(Exception):
+            await bot.send_message(GROUP_ID, text, parse_mode="HTML",
+                                   disable_web_page_preview=True)
+        await asyncio.sleep(0.5)
+
+    logger.info(f"Tug'ilgan kun tabrigi yuborildi: {len(people)} ta")
 
 
 # ─── PROGRESS BAR ─────────────────────────────────────────────────────────────
@@ -721,12 +856,17 @@ async def handle_media(message: Message):
             count = await loop.run_in_executor(None, _increment_sheet_sync, u.id)
             _local_set(u.id, count)
 
-    # Javob matni
-    bar   = progress_bar(count, DAILY_TARGET)
-    emoji = "📸" if count == 1 else "✅" if count == 2 else "🔥"
-    text  = f"{emoji} <b>{u.full_name}</b>\n{bar} <b>{count}/{DAILY_TARGET}</b>"
+    # Bugungi reja — tug'ilgan kun egasiga BIRTHDAY_TARGET (3), qolganlarga 2
+    target = await _target_for_user(u.id)
 
-    if count == DAILY_TARGET:
+    # Javob matni
+    bar   = progress_bar(count, target)
+    emoji = "📸" if count == 1 else "✅" if count >= target else "🔥"
+    text  = f"{emoji} <b>{u.full_name}</b>\n{bar} <b>{count}/{target}</b>"
+    if target == BIRTHDAY_TARGET:
+        text += "\n🎂 <i>Tug'ilgan kuningiz muborak! Bugungi reja — 3 ta.</i>"
+
+    if count == target:
         msg = random.choice([
             "✦ Tizim qayd etdi: kunlik vazifa bajarildi. Faoliyat hisobga olindi.",
             "✦ Monitoring tasdiqladi: 2/2. Siz kuzatuv tizimida yashil holatdasiz.",
@@ -735,7 +875,7 @@ async def handle_media(message: Message):
         ])
         text += f"\n✅ <b>Kunlik reja bajarildi.</b>\n🤖 <i>{msg}</i>"
 
-    elif count > DAILY_TARGET:
+    elif count > target:
         msg = random.choice([
             "✦ Tizim qayd etdi: reja oshib ketdi. Qo'shimcha faoliyat hisobga olindi.",
             "✦ Monitoring: rejadan ortiq natija. Siz bugun tizimda lider holatdasiz.",
@@ -745,7 +885,7 @@ async def handle_media(message: Message):
         text += f"\n🏆 <b>{count}-screenshot — rejadan oshib ketdingiz.</b>\n🤖 <i>{msg}</i>"
 
     else:
-        remaining = DAILY_TARGET - count
+        remaining = target - count
         roast = random.choice([
             "⚡ Tizim ogohlantiradi: vazifa bajarilmagan. Holat — qizil.",
             "⚡ Nazorat tizimi: bugungi faollik nolda. Bu hisobotga tushadi.",
@@ -1262,10 +1402,11 @@ async def check_screenshots(bot: Bot) -> None:
                 from_local = 0
         except (ValueError, TypeError):
             from_local = 0
-        cnt  = max(from_sheet, from_local)
-        name = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
-        (done if cnt >= DAILY_TARGET else debtors).append(
-            {"id": tg_id, "name": name, "count": cnt})
+        cnt    = max(from_sheet, from_local)
+        name   = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
+        target = _target_for_record(r)   # tug'ilgan kun egasiga 3
+        (done if cnt >= target else debtors).append(
+            {"id": tg_id, "name": name, "count": cnt, "target": target})
 
     total    = len(done) + len(debtors)
     done_cnt = len(done)
@@ -1281,20 +1422,22 @@ async def check_screenshots(bot: Bot) -> None:
     if done:
         lines.append("\n✅ <b>Bajardilar:</b>")
         for u in done:
-            bar = progress_bar(u["count"], DAILY_TARGET)
+            bar  = progress_bar(u["count"], u["target"])
+            cake = " 🎂" if u["target"] == BIRTHDAY_TARGET else ""
             lines.append(
-                f"{_mention(u['id'], u['name'])}\n"
-                f"   {bar} <b>{u['count']}/{DAILY_TARGET}</b>"
+                f"{_mention(u['id'], u['name'])}{cake}\n"
+                f"   {bar} <b>{u['count']}/{u['target']}</b>"
             )
 
     if debtors:
         lines.append("\n❌ <b>Bajarmadi:</b>")
         for i, u in enumerate(debtors, 1):
-            bar  = progress_bar(u["count"], DAILY_TARGET)
-            note = f"yana {DAILY_TARGET - u['count']} ta ⚠️" if u["count"] > 0 else "hali boshlamadi 🚫"
+            bar  = progress_bar(u["count"], u["target"])
+            note = f"yana {u['target'] - u['count']} ta ⚠️" if u["count"] > 0 else "hali boshlamadi 🚫"
+            cake = " 🎂" if u["target"] == BIRTHDAY_TARGET else ""
             lines.append(
-                f"{i}. {_mention(u['id'], u['name'])}\n"
-                f"   {bar} {u['count']}/{DAILY_TARGET} — {note}"
+                f"{i}. {_mention(u['id'], u['name'])}{cake}\n"
+                f"   {bar} {u['count']}/{u['target']} — {note}"
             )
         lines += [
             "\n➖➖➖➖➖➖➖➖➖➖",
@@ -1349,9 +1492,10 @@ async def check_midday(bot: Bot) -> None:
                 cnt = local
         except (ValueError, TypeError):
             pass
-        if cnt < DAILY_TARGET:
+        target = _target_for_record(r)
+        if cnt < target:
             name = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
-            debtors.append({"id": tg_id, "name": name, "count": cnt})
+            debtors.append({"id": tg_id, "name": name, "count": cnt, "target": target})
 
     if not debtors:
         return
@@ -1362,10 +1506,11 @@ async def check_midday(bot: Bot) -> None:
         f"❌ Hali screenshot tashlamaganlar: <b>{len(debtors)}</b> ta\n",
     ]
     for i, u in enumerate(debtors, 1):
-        bar  = progress_bar(u["count"], DAILY_TARGET)
-        note = f"{u['count']}/{DAILY_TARGET}" if u["count"] > 0 else "hali boshlamadi"
+        bar  = progress_bar(u["count"], u["target"])
+        note = f"{u['count']}/{u['target']}" if u["count"] > 0 else "hali boshlamadi"
+        cake = " 🎂" if u["target"] == BIRTHDAY_TARGET else ""
         lines.append(
-            f"{i}. {_mention(u['id'], u['name'])}\n"
+            f"{i}. {_mention(u['id'], u['name'])}{cake}\n"
             f"   {bar} {note}"
         )
     lines += [
@@ -1432,10 +1577,12 @@ async def cmd_users(message: Message):
                 cnt = local
         except (ValueError, TypeError):
             pass
-        name  = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
-        bar   = progress_bar(cnt, DAILY_TARGET)
-        emoji = "✅" if cnt >= DAILY_TARGET else "⚠️" if cnt > 0 else "❌"
-        lines.append(f"{emoji} <b>{name}</b>\n   {bar} {cnt}/{DAILY_TARGET}")
+        name   = f"{r.get('Ism', '')} {r.get('Familiya', '')}".strip() or "Noma'lum"
+        target = _target_for_record(r)
+        bar    = progress_bar(cnt, target)
+        emoji  = "✅" if cnt >= target else "⚠️" if cnt > 0 else "❌"
+        cake   = " 🎂" if target == BIRTHDAY_TARGET else ""
+        lines.append(f"{emoji} <b>{name}</b>{cake}\n   {bar} {cnt}/{target}")
         count += 1
         if count >= 30:
             break
@@ -1538,7 +1685,8 @@ async def cmd_help(message: Message):
         "📋 <b>Reklama Nazorat — Yordam</b>\n\n"
         "<b>Xodimlar:</b>\n"
         "• Guruhga rasm yuboring — bot hisoblaydi\n"
-        "• Har kuni kamida 2 ta rasm kerak\n\n"
+        "• Har kuni kamida 2 ta rasm kerak\n"
+        "• 🎂 Tug'ilgan kuningizda reja — 3 ta\n\n"
         "<b>Admin buyruqlari:</b>\n"
         "/start_register — Barchani ro'yxatdan o'tkazish\n"
         "/reklama_tekshir — Qo'lda nazorat\n"
@@ -1549,6 +1697,7 @@ async def cmd_help(message: Message):
         "/reklama_tozala — Dublikat ustunlarni tozalash 🧹\n\n"
         "<b>Avtomatik:</b>\n"
         "⏰ 09:30, 15:00 — Nazorat + progress bar\n"
+        "🎂 09:00 — Tug'ilgan kun tabriklari\n"
         "🕛 12:00 — Tushlik nazorati\n"
         "📆 Har dushanba 09:00 — Haftalik reyting\n"
         "🗓 Har oyning 1-si 09:00 — Oylik reyting 🏆",
@@ -1643,6 +1792,12 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     # bugungi ustun 00:00 ni kutmasdan zudlik bilan yaratiladi.
     asyncio.ensure_future(ensure_today_column(bot))
 
+    # 09:00 — tug'ilgan kun tabriklari (nazoratdan oldin)
+    sched.add_job(
+        lambda: asyncio.ensure_future(send_birthday_greetings(bot)),
+        CronTrigger(hour=9, minute=0, timezone=TZ_STR),
+        id="birthday_greetings", replace_existing=True,
+    )
     sched.add_job(
         lambda: asyncio.ensure_future(check_screenshots(bot)),
         CronTrigger(hour=9, minute=30, timezone=TZ_STR),
@@ -1681,5 +1836,5 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     )
 
     sched.start()
-    logger.info("Scheduler ishga tushdi — 8 ta trigger faol")
+    logger.info("Scheduler ishga tushdi — 9 ta trigger faol")
     return sched

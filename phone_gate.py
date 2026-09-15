@@ -1,20 +1,15 @@
-"""
-phone_gate.py — Telefon raqamini tasdiqlash (mustaqil modul).
-"""
 from __future__ import annotations
 
 import os
+import time
 import logging
-import contextlib
 import asyncio
+import contextlib
 
 from aiogram import Router, F, Bot, BaseMiddleware
 from aiogram.types import (
-    Message,
-    CallbackQuery,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardRemove,
+    Message, CallbackQuery,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
 )
 
 from broadcast import save_user, user_has_phone
@@ -22,237 +17,189 @@ from broadcast import save_user, user_has_phone
 logger = logging.getLogger(__name__)
 router = Router()
 
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))   # admin gate'dan mustasno
 
 PROMPT_TEXT = (
     "📱 <b>Botdan foydalanish uchun telefon raqamingizni tasdiqlang.</b>\n\n"
     "Quyidagi tugmani bosib, raqamingizni ulashing:"
 )
 
-# Bir marta tasdiqlangan foydalanuvchilar shu yerda saqlanadi.
+PROMPT_COOLDOWN_SECONDS = 10   # shu vaqt ichida qayta prompt yuborilmaydi
+
+# Bir marta tasdiqlangan foydalanuvchilar shu yerda keshlanadi.
 _verified_cache: set[int] = set()
 
-# Bir foydalanuvchi kontaktini parallel qayta ishlashni oldini oladi.
-_processing_users: set[int] = set()
-_processing_lock = asyncio.Lock()
+# Har bir foydalanuvchi uchun oxirgi marta prompt yuborilgan vaqt —
+# ikki marta so'rashning oldini olish uchun.
+_last_prompt_at: dict[int, float] = {}
+
+# Har bir foydalanuvchi uchun alohida navbat (lock) — parallel kelgan
+# ikkita update bir vaqtda tekshiruv/prompt yubormasin.
+_user_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_lock(user_id: int) -> asyncio.Lock:
+    if user_id not in _user_locks:
+        _user_locks[user_id] = asyncio.Lock()
+    return _user_locks[user_id]
 
 
 def _phone_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(
-                    text="📱 Raqamni ulashish",
-                    request_contact=True,
-                )
-            ]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True,
+        keyboard=[[KeyboardButton(text="📱 Raqamni ulashish", request_contact=True)]],
+        resize_keyboard=True, one_time_keyboard=True,
     )
 
 
 async def _is_verified_safe(user_id: int) -> bool:
     """
     Telefon tasdiqlanganini tekshiradi.
-
-    Sheets vaqtincha ishlamasa, allaqachon mavjud foydalanuvchini
-    tasodifan bloklab qo'ymaslik uchun fail-open ishlaydi.
+    XATO BO'LSA — bloklamaydi (True qaytaradi, ya'ni "o'tkazib yuborish").
     """
     if user_id in _verified_cache:
         return True
-
     try:
         verified = await user_has_phone(user_id)
     except Exception as e:
-        logger.error(
-            f"phone_gate: telefon tekshirishda xato — "
-            f"bloklanmaydi: {e}"
-        )
+        logger.error(f"phone_gate: tekshiruvda xato — bloklanmaydi (fail-open): {e}")
         return True
-
     if verified:
         _verified_cache.add(user_id)
-
     return verified
 
 
 def mark_verified(user_id: int) -> None:
-    """Foydalanuvchini tasdiqlanganlar cache'iga qo'shadi."""
+    """Boshqa modullar ham (kerak bo'lsa) foydalanuvchini tasdiqlangan deb belgilashi uchun."""
     _verified_cache.add(user_id)
+    _last_prompt_at.pop(user_id, None)
 
 
 class PhoneGateMiddleware(BaseMiddleware):
     """
     Har bir shaxsiy xabar/callback uchun telefon tasdig'ini tekshiradi.
-
-    Guruhlar, admin va kontakt xabarining o'zi tekshirilmaydi.
+    Guruh xabarlariga, admin'ga va kontakt xabarining o'ziga tegmaydi.
     """
 
     async def __call__(self, handler, event, data):
         try:
             bot = data.get("bot")
-
             if not isinstance(event, (Message, CallbackQuery)):
                 return await handler(event, data)
 
             user = event.from_user
-
             if user is None or user.is_bot:
                 return await handler(event, data)
 
-            chat = (
-                event.chat
-                if isinstance(event, Message)
-                else event.message.chat
-            )
-
+            chat = event.chat if isinstance(event, Message) else event.message.chat
             if chat.type != "private":
-                return await handler(event, data)
+                return await handler(event, data)   # guruhlarda tekshirmaymiz
 
             if ADMIN_ID and user.id == ADMIN_ID:
-                return await handler(event, data)
+                return await handler(event, data)   # admin mustasno
 
-            # Kontaktning o'zi on_contact_shared handleriga o'tadi.
+            # Kontaktning o'zi — pastdagi on_contact_shared handleriga o'tkazamiz
             if isinstance(event, Message) and event.contact:
                 return await handler(event, data)
 
-            if await _is_verified_safe(user.id):
+            # Kesh orqali tez yo'l — lock kerak emas
+            if user.id in _verified_cache:
                 return await handler(event, data)
 
-            text = event.text or "" if isinstance(event, Message) else ""
+            # ── Bu yerdan boshlab NAVBAT (lock) ichida ishlaymiz ──
+            # Shu orqali bir foydalanuvchidan tez-tez (deyarli bir vaqtda)
+            # kelgan ikkita update bir-birini kutadi, parallel ikkita
+            # Sheets tekshiruvi/ikkita prompt yubormaydi.
+            async with _get_lock(user.id):
+                # Navbatda kutib turgan payt boshqa update allaqachon
+                # tasdiqlagan bo'lishi mumkin — qayta tekshiramiz.
+                if await _is_verified_safe(user.id):
+                    return await handler(event, data)
 
-            # Foydalanuvchi /start qilganda ism/username'ni saqlaymiz.
-            if isinstance(event, Message) and text.startswith("/start"):
-                with contextlib.suppress(Exception):
-                    await save_user(
-                        user_id=user.id,
-                        full_name=user.full_name or "",
-                        username=user.username or "",
-                    )
+                text = (event.text or "") if isinstance(event, Message) else ""
+                if isinstance(event, Message) and text.startswith("/start"):
+                    with contextlib.suppress(Exception):
+                        await save_user(
+                            user_id=user.id,
+                            full_name=user.full_name or "",
+                            username=user.username or "",
+                        )
 
-            if bot:
-                with contextlib.suppress(Exception):
-                    await bot.send_message(
-                        user.id,
-                        PROMPT_TEXT,
-                        reply_markup=_phone_kb(),
-                        parse_mode="HTML",
-                    )
+                # Sovutish vaqti — yaqinda prompt yuborilgan bo'lsa, qayta yubormaymiz
+                now  = time.monotonic()
+                last = _last_prompt_at.get(user.id, 0.0)
+                if (now - last) >= PROMPT_COOLDOWN_SECONDS:
+                    _last_prompt_at[user.id] = now
+                    if bot:
+                        with contextlib.suppress(Exception):
+                            await bot.send_message(
+                                user.id, PROMPT_TEXT,
+                                reply_markup=_phone_kb(), parse_mode="HTML",
+                            )
 
-            if isinstance(event, CallbackQuery):
-                with contextlib.suppress(Exception):
-                    await event.answer()
-
-            return
+                if isinstance(event, CallbackQuery):
+                    with contextlib.suppress(Exception):
+                        await event.answer()
+                return   # handler'ga O'TKAZMAYMIZ
 
         except Exception as e:
-            logger.error(
-                f"phone_gate middleware xato — "
-                f"o'tkazib yuborildi: {e}"
-            )
+            # MUHIM: middleware'ning o'zida kutilmagan xato bo'lsa ham
+            # butun botni to'xtatib qo'ymaymiz — o'tkazib yuboramiz.
+            logger.error(f"phone_gate middleware xato — o'tkazib yuborildi: {e}")
             return await handler(event, data)
 
 
-@router.message(F.chat.type == "private", F.contact)
+# MUHIM (modullararo to'qnashuv tuzatildi):
+# Bu handlerga AVVAL hech qanday cheklov yo'q edi — ya'ni shaxsiy chatdagi
+# HAR QANDAY kontakt xabarini ushlab qolardi. main.py da phone_gate_router
+# personal_message_router dan OLDIN ulangani uchun, admin /xabar buyrug'i
+# ichida "📱 Telefon kontaktidan" orqali kontakt ulashganda, o'sha kontakt
+# shu yerga tushib ketardi va personal_message ning
+# PersonalMsgFSM.waiting_contact handleri UMUMAN ishga tushmasdi.
+# Natijada "Telefon kontaktidan" tanlash butunlay ishlamay turgan edi.
+#
+# Admin allaqachon telefon tekshiruvidan ozod (middleware uni o'tkazib
+# yuboradi), shuning uchun uning kontaktlari bu yerda umuman
+# ushlanmasligi kerak — filtrda chetlab o'tamiz.
+@router.message(
+    F.chat.type == "private",
+    F.contact,
+    F.from_user.id != ADMIN_ID,
+)
 async def on_contact_shared(message: Message, bot: Bot) -> None:
     """Foydalanuvchi kontaktni ulashganda ishga tushadi."""
     contact = message.contact
-    user = message.from_user
+    user    = message.from_user
 
-    if not user:
+    if contact.user_id and contact.user_id != user.id:
+        await message.answer(
+            "⚠️ Bu boshqa odamning kontakti. Iltimos, <b>faqat o'zingizning</b> "
+            "raqamingizni yuboring.",
+            reply_markup=_phone_kb(), parse_mode="HTML",
+        )
         return
 
-    # Bir foydalanuvchidan bir vaqtning o'zida kelgan
-    # ikkinchi kontaktni qayta ishlamaymiz.
-    async with _processing_lock:
-        if user.id in _processing_users:
-            await message.answer(
-                "⏳ Raqamingiz qayta ishlanmoqda. Iltimos, kuting."
+    # Shu foydalanuvchi uchun navbatni ham egallaymiz — shu bilan
+    # middleware tomondan parallel kelayotgan tekshiruv bilan
+    # to'qnashmaydi (masalan, kontakt bilan bir vaqtda boshqa xabar
+    # kelib qolsa).
+    async with _get_lock(user.id):
+        with contextlib.suppress(Exception):
+            await save_user(
+                user_id=user.id,
+                full_name=user.full_name or "",
+                username=user.username or "",
+                phone=contact.phone_number or "",
             )
-            return
-
-        _processing_users.add(user.id)
-
-    try:
-        # Faqat foydalanuvchining o'z raqami qabul qilinadi.
-        if contact.user_id and contact.user_id != user.id:
-            await message.answer(
-                "⚠️ Bu boshqa odamning kontakti. "
-                "Iltimos, <b>faqat o'zingizning</b> raqamingizni yuboring.",
-                reply_markup=_phone_kb(),
-                parse_mode="HTML",
-            )
-            return
-
-        phone = contact.phone_number or ""
-
-        if not phone:
-            await message.answer(
-                "❌ Telefon raqami aniqlanmadi. "
-                "Iltimos, qaytadan yuboring.",
-                reply_markup=_phone_kb(),
-                parse_mode="HTML",
-            )
-            return
-
-        # Avval Sheets'ga yozamiz.
-        saved = await save_user(
-            user_id=user.id,
-            full_name=user.full_name or "",
-            username=user.username or "",
-            phone=phone,
-        )
-
-        # Sheets'ga yozish muvaffaqiyatsiz bo'lsa,
-        # foydalanuvchini tasdiqlangan deb hisoblamaymiz.
-        if not saved:
-            logger.error(
-                f"phone_gate: telefon Sheets'ga yozilmadi "
-                f"(user_id={user.id})"
-            )
-
-            await message.answer(
-                "❌ Telefon raqamingizni saqlashda xatolik yuz berdi.\n\n"
-                "Iltimos, birozdan so'ng qayta urinib ko'ring.",
-                reply_markup=_phone_kb(),
-                parse_mode="HTML",
-            )
-            return
-
-        # Faqat muvaffaqiyatli yozilgandan keyin tasdiqlaymiz.
+        # Sheets yozuvi muvaffaqiyatsiz bo'lsa ham — foydalanuvchi
+        # bloklanib qolmasin, kesh orqali darhol "tasdiqlangan" deb
+        # belgilaymiz (bu ham prompt-cooldown'ni tozalaydi).
         mark_verified(user.id)
 
-        await message.answer(
-            "✅ <b>Raqamingiz tasdiqlandi!</b>",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="HTML",
-        )
+    await message.answer(
+        "✅ <b>Raqamingiz tasdiqlandi!</b>",
+        reply_markup=ReplyKeyboardRemove(), parse_mode="HTML",
+    )
 
-        # Keyingi jarayon faqat Sheets yozuvi muvaffaqiyatli
-        # tugagandan keyin ishga tushadi.
-        try:
-            from start import send_promo
-            await send_promo(bot, user.id)
-        except Exception as e:
-            logger.error(
-                f"phone_gate: send_promo xatosi "
-                f"(user_id={user.id}): {e}"
-            )
-
-    except Exception as e:
-        logger.error(
-            f"phone_gate: kontaktni qayta ishlashda xato "
-            f"(user_id={user.id}): {e}"
-        )
-
-        await message.answer(
-            "❌ Telefon raqamingizni tasdiqlashda xatolik yuz berdi.\n\n"
-            "Iltimos, qayta urinib ko'ring.",
-            reply_markup=_phone_kb(),
-            parse_mode="HTML",
-        )
-
-    finally:
-        async with _processing_lock:
-            _processing_users.discard(user.id)
+    with contextlib.suppress(Exception):
+        from start import send_promo
+        await send_promo(bot, user.id)

@@ -14,7 +14,7 @@ async def taxi_bandlik_info(callback: CallbackQuery, bot: Bot):
     text = (
         "🚖 <b>Taxi-Bandlik mikroqarzi:</b>\n\n"
         "– Taksi faoliyati bilan shug'ullanuvchi shaxslarga\n"
-        "– Kredit summasi: 15 000 000 so'mgacha\n"
+        "– Kredit summasi: 10 000 000 so'mgacha\n"
         "– Kredit muddati: 12 oy\n\n"
 
         "📋 <b>Talab qilinadigan hujjatlar:</b>\n"

@@ -86,7 +86,7 @@ CFG = {
     },
     "calc_taxi_bandlik": {
         "name": "Taxi-Bandlik mikroqarzi", "rate": 56,
-        "min": 3_000_000, "max": 15_000_000, "mmin": 12, "mmax": 12,
+        "min": 3_000_000, "max": 10_000_000, "mmin": 12, "mmax": 12,
     },
     "calc_oila": {
         "name": "Oila mikroqarzi", "rate": 56,

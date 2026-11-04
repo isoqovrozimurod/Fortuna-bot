@@ -92,6 +92,10 @@ CFG = {
         "name": "Oila mikroqarzi", "rate": 56,
         "min": 3_000_000, "max": 10_000_000, "mmin": 12, "mmax": 12,
     },
+    "calc_oson": {
+        "name": "OSON mikroqarzi", "rate": 65,
+        "min": 500_000, "max": 5_000_000, "mmin": 1, "mmax": 12,
+    },
 }
 
 BACK_KB = InlineKeyboardMarkup(

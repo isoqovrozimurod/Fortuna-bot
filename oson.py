@@ -25,7 +25,7 @@ TEXT = (
     "– Kredit muddati: 12 oygacha\n\n"
 
     "📋 <b>Talab qilinadigan hujjatlar:</b>\n"
-    " • Pasport"
+    " • Pasport\n"
     "• Bank plastik kartasi\n\n"
 
     "<b>Murojaat uchun:</b>\n"

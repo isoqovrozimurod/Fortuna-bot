@@ -94,7 +94,7 @@ CFG = {
     },
     "calc_oson": {
         "name": "OSON mikroqarzi", "rate": 65,
-        "min": 2_000_000, "max": 5_000_000, "mmin": 1, "mmax": 12,
+        "min": 2_000_000, "max": 5_000_000, "mmin": 12, "mmax": 12,
     },
 }
 

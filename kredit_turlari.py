@@ -1,12 +1,18 @@
 from pathlib import Path
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    FSInputFile
+)
 
 router = Router()
 
 BASE_DIR = Path(__file__).resolve().parent
-BANNER = BASE_DIR / "temp" / "full_banner" / "banner_barchasi.jpg"
+BANNER = BASE_DIR / "temp" / "banner_barchasi.jpg"
 
 
 def kredit_turlari_kb():
@@ -26,11 +32,15 @@ def kredit_turlari_kb():
             ],
             [
                 InlineKeyboardButton(text="🚖 Taxi-Bandlik",      callback_data="taxi_bandlik"),
-                InlineKeyboardButton(text="🏠 OILA (Migrantlar uchun)",   callback_data="oila"),
+                InlineKeyboardButton(text="🏠 OILA mikroqarzi",   callback_data="oila"),
+            ],
+            [
+                InlineKeyboardButton(text="💳 OSON mikroqarzi",   callback_data="oson"),
             ],
             [InlineKeyboardButton(text="⬅️ Ortga",             callback_data="back_to_menu")],
         ]
     )
+
 
 def kredit_text():
     return (
@@ -40,9 +50,9 @@ def kredit_text():
         "🚗 Avtomashina egalari\n"
         "🏢 Biznes egalari\n"
         "🤝 Budjet tashkiloti xodimlari (Hamkor)\n"
-        "🚘 Avto-Drive (avtomobil egalariga kichik mikroqarz)\n"
+        "🚘 Avto-Drive (avtomobil egalariga)\n"
         "🚖 Taxi-Bandlik (taksi haydovchilari)\n"
-        "🏠 Oila mikroqarzi (Migrantlar uchun)"
+        "💳 OSON (rasmiy daromadsiz, karta aylanmasi bo'yicha)"
     )
 
 

@@ -46,6 +46,7 @@ from personal_message import router as personal_message_router
 from post.handlers import router as post_router
 from post.scheduler import setup_scheduler as setup_post_scheduler
 from phone_gate import router as phone_gate_router, PhoneGateMiddleware
+from kassa import router as kassa_router
 
 
 # =================== LOGGING ===================
@@ -275,6 +276,7 @@ def setup_dispatcher() -> Dispatcher:
 
     dp.include_router(phone_gate_router)
     dp.include_router(chanel_router)
+    dp.include_router(kassa_router)
     dp.include_router(control_router)
     dp.include_router(reklama_router)
     dp.include_router(start_router)

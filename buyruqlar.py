@@ -108,6 +108,9 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="refresh_branches", description="Filiallarni yangilash"),
         BotCommand(command="guruhlar",         description="Bot admin bo'lgan guruhlar ro'yxati"),
         BotCommand(command="guruhlar_tekshir", description="Guruhlar holatini qo'lda tekshirish"),
+        BotCommand(command="kassa",            description="Kassa hisoboti kiritish"),
+        BotCommand(command="hisobot",          description="Kassa hisobotini ko'rish"),
+        BotCommand(command="oy",               description="Kassa: oylik natija"),
         scoring_command,
     ]
 

@@ -90,6 +90,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="valyuta",        description="Valyuta kursi"),
         BotCommand(command="vakansiya",      description="Vakansiya"),
         BotCommand(command="filiallar",      description="Filiallar xaritasi"),
+        BotCommand(command="konvertatsiya",  description="Konvertatsiya (rasm → PDF)"),
     ]
 
     scoring_command = BotCommand(command="scoring", description="Scoring — qarz yuki hisoblash")

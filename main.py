@@ -1,6 +1,6 @@
-
 import os
 import sys
+import time
 import uuid
 import asyncio
 import logging
@@ -47,6 +47,7 @@ from post.handlers import router as post_router
 from post.scheduler import setup_scheduler as setup_post_scheduler
 from phone_gate import router as phone_gate_router, PhoneGateMiddleware
 from kassa import router as kassa_router
+from konvertatsiya import router as konv_router
 
 
 # =================== LOGGING ===================
@@ -138,8 +139,18 @@ async def acquire_lock(
 # GET + SET o'rniga atomar Lua skripti ishlatiladi.
 
 REFRESH_LOCK_SCRIPT = """
-if redis.call("GET", KEYS[1]) == ARGV[1] then
+local cur = redis.call("GET", KEYS[1])
+
+if cur == ARGV[1] then
     return redis.call("EXPIRE", KEYS[1], ARGV[2])
+end
+
+-- Redis uzilib qolgani sabab lock muddati tugagan bo'lsa va uni hech kim
+-- egallamagan bo'lsa — qayta egallaymiz (aks holda "lock yo'qotildi" deb
+-- schedulerlar abadiy to'xtab qolardi).
+if not cur then
+    redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
+    return 1
 end
 
 return 0
@@ -154,10 +165,8 @@ async def refresh_lock(
 ) -> bool:
     result = await redis.eval(
         REFRESH_LOCK_SCRIPT,
-        1,
-        key,
-        value,
-        ttl,
+        keys=[key],
+        args=[value, str(ttl)],
     )
 
     return bool(result)
@@ -182,9 +191,8 @@ async def release_lock(
     try:
         await redis.eval(
             RELEASE_LOCK_SCRIPT,
-            1,
-            key,
-            value,
+            keys=[key],
+            args=[value],
         )
 
         logger.info("Redis lock bo'shatildi: %s", key)
@@ -208,9 +216,11 @@ async def refresh_lock_loop(
 ):
     interval = max(5, ttl // 2)
     retry_delay = 5
+    delay = interval
+    last_ok = time.monotonic()
 
     while True:
-        await asyncio.sleep(interval)
+        await asyncio.sleep(delay)
 
         try:
             refreshed = await refresh_lock(
@@ -222,7 +232,7 @@ async def refresh_lock_loop(
 
             if not refreshed:
                 logger.critical(
-                    "Lock yo'qotildi yoki boshqa instansiyaga o'tdi: %s",
+                    "Lock boshqa instansiyaga o'tdi: %s",
                     key,
                 )
 
@@ -231,7 +241,9 @@ async def refresh_lock_loop(
 
                 return
 
+            delay = interval
             retry_delay = 5
+            last_ok = time.monotonic()
 
         except asyncio.CancelledError:
             raise
@@ -243,11 +255,14 @@ async def refresh_lock_loop(
                 e,
             )
 
-            # Scheduler locki yangilanmasa,
-            # takroriy vazifalar xavfini oldini olamiz.
-            if stop_on_error:
+            # Scheduler locki: bitta vaqtinchalik xato (Upstash rate-limit,
+            # tarmoq) schedulerlarni o'ldirmasin. Faqat lock muddati tugash
+            # arafasiga kelganda (TTL ning 80%i) — boshqa server egallab
+            # olishi mumkin bo'lgan paytda — to'xtatamiz.
+            if stop_on_error and time.monotonic() - last_ok >= ttl * 0.8:
                 logger.critical(
-                    "Scheduler lock yangilanmadi. Schedulerlar to'xtatiladi."
+                    "Scheduler lock uzoq vaqt yangilanmadi. "
+                    "Schedulerlar to'xtatiladi."
                 )
 
                 if on_lock_lost:
@@ -255,10 +270,10 @@ async def refresh_lock_loop(
 
                 return
 
-            # Polling locki uchun vaqtinchalik xatolarda
-            # botni darhol to'xtatmaymiz.
-            await asyncio.sleep(retry_delay)
-            retry_delay = min(retry_delay * 2, 60)
+            # Xatodan keyin tez qayta urinamiz (keyingi odatiy intervalni
+            # kutmaymiz — u vaqtga kelib lock tugab qolishi mumkin).
+            delay = retry_delay
+            retry_delay = min(retry_delay * 2, 15)
 
 
 # =================== DISPATCHER ===================
@@ -280,6 +295,7 @@ def setup_dispatcher() -> Dispatcher:
     dp.include_router(control_router)
     dp.include_router(reklama_router)
     dp.include_router(start_router)
+    dp.include_router(konv_router)
     dp.include_router(contact_router)
     dp.include_router(kredit_router)
     dp.include_router(pensiya_router)
@@ -395,6 +411,11 @@ async def main():
 
     polling_lock_task = None
     scheduler_lock_task = None
+
+    # finally blokida ishlatiladi — try ichida xato bo'lsa ham mavjud bo'lsin
+    polling_lock_acquired = False
+    scheduler_lock_acquired = False
+    exit_code = 0
 
     schedulers = []
 
@@ -635,6 +656,7 @@ async def main():
             "Telegram polling konflikti! "
             "Ushbu bot tokeni bilan boshqa polling instansiyasi ishlayapti."
         )
+        exit_code = 1
 
     except asyncio.CancelledError:
         logger.info("Bot vazifasi bekor qilindi.")
@@ -642,6 +664,7 @@ async def main():
 
     except Exception:
         logger.exception("MAIN jarayonida kutilmagan xato.")
+        exit_code = 1
 
     finally:
         logger.info("Bot to'xtatilmoqda...")
@@ -686,6 +709,11 @@ async def main():
                 await bot.session.close()
 
         logger.info("Bot to'xtatildi.")
+
+        # Jim (0 kod bilan) chiqib ketmaymiz — platforma botni qayta
+        # ishga tushirishi uchun xato kodi bilan tugatamiz.
+        if exit_code:
+            raise SystemExit(exit_code)
 
 
 # =================== ENTRY POINT ===================

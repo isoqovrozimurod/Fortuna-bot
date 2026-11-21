@@ -150,18 +150,33 @@ async def set_bot_commands(bot: Bot):
         except Exception as e:
             logger.error(f"⚠️ Admin buyruqlarini o'rnatishda xato: {e}")
 
+    
     if KASSA_BOSS_ID and KASSA_BOSS_ID != ADMIN_ID:
-    try:
-        await bot.set_my_commands(
-            commands=default_commands + [
-                BotCommand(command="hisobot", description="Kassa hisobotini ko'rish"),
-                BotCommand(command="oy",      description="Kassa: oylik natija"),
-            ],
-            scope=BotCommandScopeChat(chat_id=KASSA_BOSS_ID)
-        )
-        logger.info(f"✅ Boshliq buyruqlari o'rnatildi (ID: {KASSA_BOSS_ID})")
-    except Exception as e:
-        logger.error(f"⚠️ Boshliq buyruqlarini o'rnatishda xato: {e}")
+        try:
+            await bot.set_my_commands(
+                commands=default_commands + [
+                    BotCommand(
+                        command="hisobot",
+                        description="Kassa hisobotini ko'rish",
+                    ),
+                    BotCommand(
+                        command="oy",
+                        description="Kassa: oylik natija",
+                    ),
+                ],
+                scope=BotCommandScopeChat(chat_id=KASSA_BOSS_ID),
+            )
+
+            logger.info(
+                f"✅ Boshliq buyruqlari o'rnatildi "
+                f"(ID: {KASSA_BOSS_ID})"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"⚠️ Boshliq buyruqlarini o'rnatishda xato: {e}"
+            )
+
 
     if JOB_ID:
         try:

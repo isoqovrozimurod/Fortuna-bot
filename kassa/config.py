@@ -61,6 +61,22 @@ def boss_id() -> int:
     return _int_env("KASSA_BOSS_ID")
 
 
+def is_boss_view(user_id: int) -> bool:
+    """Boshliq (faqat o'qish): KASSA_BOSS_ID, lekin kassir/admin emas."""
+    b = boss_id()
+    return bool(b) and user_id == b and user_id not in allowed_ids()
+
+
+class ReadAllowed(BaseFilter):
+    """Kassir/admin YOKI boshliq — faqat o'qish buyruqlari (/hisobot, /oy) uchun."""
+
+    async def __call__(self, event) -> bool:
+        user = getattr(event, "from_user", None)
+        if not user:
+            return False
+        return user.id in allowed_ids() or is_boss_view(user.id)
+
+
 class Allowed(BaseFilter):
     """Faqat kassir/admin. Boshqalar uchun handler 'topilmadi' bo'ladi va
     xabar boshqa routerlarga o'tadi (bot ularga bu modulni bildirmaydi)."""

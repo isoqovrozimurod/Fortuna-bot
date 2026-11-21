@@ -6,8 +6,8 @@ Oqim (faqat ruxsat etilgan ID'lar: ADMIN_ID va MY_ID):
            -> kun boshiga qoldiq (kechagi hisobotdan, tasdiqlanadi)
            -> summalar -> tasdiqlash -> bazaga saqlash -> hisobot RASMI (sizga)
            -> [Boshliqqa yuborish] tugmasi -> rasm boshliqqa ketadi
-  /hisobot [sana]   -> saqlangan hisobot rasmi
-  /oy [oy.yyyy]     -> oylik natija
+  /hisobot [sana]   -> saqlangan hisobot rasmi   (boshliq ham: faqat YUBORILGANlar)
+  /oy [oy.yyyy]     -> oylik natija              (boshliq ham: faqat YUBORILGANlar)
   /bekor            -> kiritishni bekor qilish
 
 Fayllar:
@@ -21,6 +21,13 @@ Fayllar:
 
 main.py'da:  from kassa import router as kassa_router
 """
-from .handlers import router
+from aiogram import Router
+
+from .handlers import read_router, router as _kassir_router
+
+# /hisobot va /oy — kassir VA boshliq (faqat yuborilganlar); qolganlari — faqat kassir.
+router = Router(name="kassa")
+router.include_router(read_router)
+router.include_router(_kassir_router)
 
 __all__ = ["router"]

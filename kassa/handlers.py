@@ -13,7 +13,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 
-from .config import FIELDS, MONTHS_UZ, STATUS_SENT, Allowed, boss_id
+from .config import FIELDS, MONTHS_UZ, STATUS_SENT, Allowed, ReadAllowed, boss_id, is_boss_view
 from .db import KassaDBError, get_db
 from .keyboards import btn, kb_field, kb_menu, kb_report
 from .logic import compute, fmt, fmt_date, net_income, parse_amount, parse_date, today_tz
@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 router = Router()
 router.message.filter(Allowed(), F.chat.type == "private")
 router.callback_query.filter(Allowed())
+
+# Faqat o'qish buyruqlari (/hisobot, /oy): kassir/admin VA boshliq.
+# Boshliq faqat boshliqqa YUBORILGAN hisobotlarni ko'radi.
+read_router = Router()
+read_router.message.filter(ReadAllowed(), F.chat.type == "private")
 
 
 # ───────────────────────── FSM ─────────────────────────
@@ -122,8 +127,9 @@ async def cmd_bekor(message: Message, state: FSMContext):
     await message.answer("❌ Kassa kiritish bekor qilindi.")
 
 
-@router.message(Command("hisobot"))
+@read_router.message(Command("hisobot"))
 async def cmd_hisobot(message: Message, command, state: FSMContext):
+    boss_view = is_boss_view(message.from_user.id)
     arg = (command.args or "").strip()
     sana = parse_date(arg, today_tz()) if arg else today_tz()
     if sana is None:
@@ -134,18 +140,30 @@ async def cmd_hisobot(message: Message, command, state: FSMContext):
     except KassaDBError as e:
         await message.answer(f"⚠️ {e}")
         return
+    if row and boss_view and row.get("status") != STATUS_SENT:
+        row = None                      # boshliq yuborilmagan hisobotni ko'rmaydi
     if not row:
-        await message.answer(f"{fmt_date(sana)} sanasi uchun hisobot topilmadi. Kiritish: /kassa")
+        tail = " Boshqa sana: <code>/hisobot 13.11.2026</code>" if boss_view else " Kiritish: /kassa"
+        await message.answer(f"{fmt_date(sana)} sanasi uchun hisobot topilmadi.{tail}")
         return
+    if boss_view:
+        caption = f"📒 Kassa hisoboti — {fmt_date(sana)}"
+        if int(row["versiya"]) > 1:
+            caption += f"\n🔄 Tuzatilgan hisobot (v{row['versiya']})"
+        markup = None
+    else:
+        caption = f"📒 Kassa hisoboti — {fmt_date(sana)} (versiya {row['versiya']})"
+        markup = kb_report(row)
     await message.answer_photo(
         BufferedInputFile(render_report(row), filename=f"kassa_{row['sana']}.png"),
-        caption=f"📒 Kassa hisoboti — {fmt_date(sana)} (versiya {row['versiya']})",
-        reply_markup=kb_report(row),
+        caption=caption,
+        reply_markup=markup,
     )
 
 
-@router.message(Command("oy"))
+@read_router.message(Command("oy"))
 async def cmd_oy(message: Message, command):
+    boss_view = is_boss_view(message.from_user.id)
     arg = (command.args or "").strip()
     today = today_tz()
     year, month = today.year, today.month
@@ -161,6 +179,8 @@ async def cmd_oy(message: Message, command):
     except KassaDBError as e:
         await message.answer(f"⚠️ {e}")
         return
+    if boss_view:
+        rows = [r for r in rows if r.get("status") == STATUS_SENT]
     if not rows:
         await message.answer(f"{MONTHS_UZ[month - 1]} {year}: hisobot yo'q.")
         return
@@ -182,7 +202,8 @@ async def cmd_oy(message: Message, command):
         f"Oy oxiriga qoldiq: <b>{fmt(rows[-1]['qoldiq'])}</b>",
     ]
     if missing:
-        lines.append(f"\nℹ️ Hisobot kiritilmagan kunlar: {', '.join(missing)}")
+        label = "Yuborilmagan kunlar" if boss_view else "Hisobot kiritilmagan kunlar"
+        lines.append(f"\nℹ️ {label}: {', '.join(missing)}")
     await message.answer("\n".join(lines))
 
 

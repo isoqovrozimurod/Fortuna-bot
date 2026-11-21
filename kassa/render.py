@@ -11,11 +11,13 @@ from .logic import fmt, fmt_date
 
 
 _FONT_REG = [
+    os.path.join(BASE_DIR, "fonts", "calibri.ttf"),
     os.path.join(BASE_DIR, "fonts", "Carlito-Regular.ttf"),
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
 ]
 _FONT_BOLD = [
+    os.path.join(BASE_DIR, "fonts", "calibrib.ttf"),
     os.path.join(BASE_DIR, "fonts", "Carlito-Bold.ttf"),
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",

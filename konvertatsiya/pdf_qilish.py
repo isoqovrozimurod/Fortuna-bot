@@ -113,7 +113,7 @@ def status_text(items: list[Item], rejected: list[str]) -> str:
 def classify(m: Message) -> tuple[Item | None, str | None]:
     if m.photo:
         p = m.photo[-1]
-        return Item(p.file_id, None, p.file_size, "image"), None
+        return Item(p.file_id, None, p.file_size, "image", m.message_id), None
     d = m.document
     if not d:
         return None, "Fayl emas"
@@ -132,11 +132,13 @@ def classify(m: Message) -> tuple[Item | None, str | None]:
         return None, f"{label} — format qo'llab-quvvatlanmaydi"
     if d.file_size and d.file_size > MAX_FILE_MB * MB:
         return None, f"{label} — {MAX_FILE_MB} MB dan katta"
-    return Item(d.file_id, name or None, d.file_size, kind), None
+    return Item(d.file_id, name or None, d.file_size, kind, m.message_id), None
 
 
 def _items(data: dict) -> list[Item]:
-    return [Item(**d) for d in data.get("items", [])]
+    """Fayllar yuborilish tartibida (xabar ID bo'yicha): albom xabarlari bir vaqtda
+    kelib, handlerlar tartibsiz ishlashi mumkin — tartibni message_id saqlaydi."""
+    return sorted((Item(**d) for d in data.get("items", [])), key=lambda it: it.mid)
 
 
 # ───────── kirish ─────────

@@ -41,6 +41,7 @@ class Item:
     name: Optional[str]      # asl fayl nomi (rasm 'photo' bo'lsa — None)
     size: Optional[int]
     kind: str                # "image" | "pdf" | "office"
+    mid: int = 0             # Telegram xabar ID'si — yuborilish tartibi (albom tartibi shundan)
 
 
 @dataclass(frozen=True)

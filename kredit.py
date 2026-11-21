@@ -1,21 +1,22 @@
 """
 /kredit — admin uchun to'lov jadvali kalkulyatori.
-Optimizatsiya: matplotlib executor da ishlaydi, DPI kamaytrilgan,
-lock bilan thread-safe, float foiz stavkasi qo'llab-quvvatlanadi.
+Jadval Pillow bilan chiziladi (matplotlib ishlatilmaydi), float foiz stavkasi
+qo'llab-quvvatlanadi. Juda uzun jadval (Telegram foto o'lcham limitidan oshsa)
+PNG fayl (hujjat) sifatida yuboriladi.
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
+import logging
 import os
 import re
 import uuid
-from functools import partial
+from functools import lru_cache, partial
 from typing import List
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+from PIL import Image, ImageDraw, ImageFont
 
 from aiogram import Router, F, Bot, types
 from aiogram.enums import ParseMode
@@ -26,13 +27,41 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 try:
     ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 except ValueError:
     ADMIN_ID = 0
 
-router   = Router()
-_plt_lock = asyncio.Lock()   # matplotlib thread-safe emas
+router = Router()
+
+# ── Font ───────────────────────────────────────────────────────
+
+_FONT_PATHS = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+]
+_FONT_BOLD_PATHS = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+]
+
+
+@lru_cache(maxsize=16)
+def _load_font(bold: bool, size: int):
+    for p in (_FONT_BOLD_PATHS if bold else _FONT_PATHS):
+        try:
+            return ImageFont.truetype(p, size)
+        except Exception:
+            pass
+    try:                                    # Pillow >= 10.1: o'lchamli o'rnatilgan shrift
+        return ImageFont.load_default(size)
+    except TypeError:                       # eski Pillow: kichik bitmap shrift
+        return ImageFont.load_default()
+
 
 # ── Yordamchi ──────────────────────────────────────────────────
 
@@ -89,60 +118,95 @@ def _diff_table(pr: float, rate: float, m: int) -> List[List]:
     return rows
 
 
-# ── PNG generatsiya (sinxron — executor da ishlatiladi) ────────
+# ── PNG generatsiya (Pillow; sinxron — executor da ishlatiladi) ─
 
-def _draw_png_sync(rows: List[List], title: str, kredit_summa: float) -> bytes:
-    headers = ["Sana", "Foizlar", "Asosiy qarz", "Oylik to'lov", "Qoldiq summa"]
-    body    = [headers]
+# Telegram foto: kenglik + balandlik <= 10000, nisbat <= 20. Zaxira bilan:
+PHOTO_MAX_SUM = 9500
+PHOTO_MAX_RATIO = 15
+
+_HEADERS = ["Sana", "Foizlar", "Asosiy qarz", "Oylik to'lov", "Qoldiq summa"]
+_COL_W = [110, 170, 170, 170, 170]          # 1x masshtabda
+_CLR = {
+    "header": "#A9D0F5", "footer": "#A9D0F5", "pay": "#e6e6e6",
+    "even": "#f4f4f4", "white": "#ffffff", "grid": "#cccccc",
+}
+
+
+def _center_text(draw: ImageDraw.ImageDraw, cx: float, cy: float, s: str, font, fill: str):
+    try:
+        draw.text((cx, cy), s, fill=fill, font=font, anchor="mm")
+    except (ValueError, TypeError):         # bitmap shriftda anchor yo'q
+        w = draw.textlength(s, font=font)
+        draw.text((cx - w / 2, cy - 5), s, fill=fill, font=font)
+
+
+def _draw_png_sync(rows: List[List], title: str, kredit_summa: float) -> tuple[bytes, bool]:
+    """(png_bytes, foto_sifatida_yuborsa_bo'ladimi)"""
+    body = [_HEADERS]
     for r in rows:
         body.append([r[0], *[fmt(x) for x in r[1:]]])
-
     jami_foiz  = sum(r[1] for r in rows[1:])
     jami_tolov = sum(r[3] for r in rows[1:])
     body.append(["Jami", fmt(jami_foiz), fmt(kredit_summa), fmt(jami_tolov), "—"])
 
-    row_count = len(body)
-    fig, ax   = plt.subplots(figsize=(10, 0.4 + row_count * 0.32))
-    ax.axis("off")
+    n = len(body)
+    S = 2 if n <= 70 else 1                 # kichik jadval — aniqroq (2x), katta — 1x
+    col_w = [w * S for w in _COL_W]
+    row_h, pad, title_h = 30 * S, 16 * S, 40 * S
+    fs = 14 * S
 
-    table = ax.table(cellText=body, loc="center", cellLoc="center")
-    table.auto_set_font_size(False)
-    table.set_fontsize(8 if row_count <= 26 else 6.5)
-    table.scale(1, 1.1)
+    font, font_bold = _load_font(False, fs), _load_font(True, fs)
+    font_title = _load_font(True, int(fs * 1.15))
 
-    for r in range(row_count):
-        for c in range(5):
-            cell = table[(r, c)]
-            if r == 0:
-                cell.set_facecolor("#A9D0F5")
-                cell.get_text().set_weight("bold")
-            elif r == row_count - 1:
-                cell.set_facecolor("#A9D0F5")
-                cell.get_text().set_weight("bold")
-            elif c == 3:
-                cell.set_facecolor("#e6e6e6")
-                cell.get_text().set_weight("bold")
-            elif r % 2 == 0:
-                cell.set_facecolor("#f4f4f4")
-            cell.set_edgecolor("#cccccc")
-            cell.set_linewidth(0.3)
+    W = sum(col_w) + pad * 2
+    H = row_h * n + pad * 2 + title_h
 
-    plt.suptitle(title, fontsize=11, weight="bold", y=0.98)
+    img = Image.new("RGB", (W, H), "white")
+    draw = ImageDraw.Draw(img)
+    draw.text((pad, pad), title, fill="#003366", font=font_title)
+    y0 = pad + title_h
+
+    for ri, row in enumerate(body):
+        y = y0 + ri * row_h
+        x = pad
+        edge = ri in (0, n - 1)
+        for ci, (cell, cw) in enumerate(zip(row, col_w)):
+            if ri == 0:
+                bg = _CLR["header"]
+            elif ri == n - 1:
+                bg = _CLR["footer"]
+            elif ci == 3:
+                bg = _CLR["pay"]
+            elif ri % 2 == 0:
+                bg = _CLR["even"]
+            else:
+                bg = _CLR["white"]
+            draw.rectangle([x, y, x + cw, y + row_h], fill=bg, outline=_CLR["grid"], width=1)
+            _center_text(draw, x + cw / 2, y + row_h / 2, str(cell),
+                         font_bold if (edge or ci == 3) else font, "#111111")
+            x += cw
+
     buf = io.BytesIO()
-    plt.savefig(buf, dpi=150, format="png", bbox_inches="tight")   # 150 dpi — 2x tezroq
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
+    img.save(buf, format="PNG", optimize=True)
+    as_photo = (W + H <= PHOTO_MAX_SUM) and (max(W, H) / min(W, H) <= PHOTO_MAX_RATIO)
+    return buf.getvalue(), as_photo
 
 
-async def _draw_png(rows: List[List], title: str, summa: float) -> BufferedInputFile:
-    """Async wrapper — event loop ni bloklamaydi. Bir vaqtda faqat bitta."""
-    async with _plt_lock:
-        loop = asyncio.get_running_loop()
-        data = await loop.run_in_executor(
-            None, partial(_draw_png_sync, rows, title, summa)
-        )
-    return BufferedInputFile(data, filename=f"{uuid.uuid4()}.png")
+async def _draw_png(rows: List[List], title: str, summa: float) -> tuple[BufferedInputFile, bool]:
+    """Async wrapper — event loop ni bloklamaydi."""
+    loop = asyncio.get_running_loop()
+    data, as_photo = await loop.run_in_executor(
+        None, partial(_draw_png_sync, rows, title, summa)
+    )
+    return BufferedInputFile(data, filename=f"{uuid.uuid4()}.png"), as_photo
+
+
+async def _send_img(bot: Bot, chat_id: int, img: tuple[BufferedInputFile, bool], caption: str):
+    file, as_photo = img
+    if as_photo:
+        await bot.send_photo(chat_id, file, caption=caption, parse_mode=ParseMode.HTML)
+    else:                                   # juda uzun jadval — fayl sifatida (siqilmaydi)
+        await bot.send_document(chat_id, file, caption=caption, parse_mode=ParseMode.HTML)
 
 
 # ── FSM ────────────────────────────────────────────────────────
@@ -224,33 +288,23 @@ async def get_rate_and_result(msg: types.Message, bot: Bot, state: FSMContext):
     await state.clear()
 
     wait_msg = await msg.answer("⏳ Jadval tayyorlanmoqda...")
-
     label = f"{months} oy | {rate}%"
 
-    # Ikki jadval ketma-ket — lock tufayli parallel foyda yo'q
-    ann_img  = await _draw_png(
-        _ann_table(summa, rate, months),
-        f"Annuitet – {label}", summa
-    )
-    diff_img = await _draw_png(
-        _diff_table(summa, rate, months),
-        f"Differensial – {label}", summa
-    )
-
-    await bot.send_photo(
-        msg.chat.id, ann_img,
-        caption=f"📄 <b>Annuitet jadval</b>\n{fmt(summa)} so'm | {label}",
-        parse_mode=ParseMode.HTML,
-    )
-    await bot.send_photo(
-        msg.chat.id, diff_img,
-        caption=f"📄 <b>Differensial jadval</b>\n{fmt(summa)} so'm | {label}",
-        parse_mode=ParseMode.HTML,
-    )
-
-    import contextlib
-    with contextlib.suppress(Exception):
-        await wait_msg.delete()
+    try:
+        ann_img, diff_img = await asyncio.gather(
+            _draw_png(_ann_table(summa, rate, months), f"Annuitet – {label}", summa),
+            _draw_png(_diff_table(summa, rate, months), f"Differensial – {label}", summa),
+        )
+        await _send_img(bot, msg.chat.id, ann_img,
+                        f"📄 <b>Annuitet jadval</b>\n{fmt(summa)} so'm | {label}")
+        await _send_img(bot, msg.chat.id, diff_img,
+                        f"📄 <b>Differensial jadval</b>\n{fmt(summa)} so'm | {label}")
+    except Exception:
+        logger.exception("Kredit jadvalini chizish/yuborishda xato")
+        await msg.answer("❌ Jadvalni tayyorlashda xato. Qayta urinib ko'ring: /kredit")
+    finally:
+        with contextlib.suppress(Exception):
+            await wait_msg.delete()
 
 
 @router.callback_query(F.data == "kredit_cancel")
@@ -258,153 +312,3 @@ async def cb_cancel(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await call.answer()
     await call.message.edit_text("❌ Bekor qilindi.")
-fmt = lambda n: f"{round(n):,}".replace(",", " ")
-
-def only_number(text: str, allow_float: bool = False) -> str:
-    """
-    Matndan faqat raqamlarni ajratib oladi.
-    allow_float=True bo‘lsa bitta nuqtaga ruxsat beradi.
-    """
-    if allow_float:
-        # faqat bitta nuqta qoldiramiz
-        cleaned = re.sub(r"[^0-9.]", "", text or "")
-        # ortiqcha nuqtalarni olib tashlaymiz (faqat birinchisini qoldiramiz)
-        if cleaned.count(".") > 1:
-            first = cleaned.find(".")
-            cleaned = cleaned[:first + 1] + cleaned[first + 1:].replace(".", "")
-        return cleaned
-    return re.sub(r"\D", "", text or "")
-
-# === Annuitet jadvali ===
-def ann_table(pr: float, rate: float, m: int) -> List[List]:
-    r = rate / 12 / 100
-    pay = pr * r / (1 - (1 + r) ** -m)
-    bal = pr
-    rows = [["Boshlanish", 0.0, 0.0, 0.0, pr]]
-    for i in range(1, m + 1):
-        interest = bal * r
-        principal = pay - interest
-        bal -= principal
-        rows.append([f"{i}-oy", interest, principal, pay, max(0.0, bal)])
-    return rows
-
-# === Differensial jadvali ===
-def diff_table(pr: float, rate: float, m: int) -> List[List]:
-    r = rate / 12 / 100
-    principal = pr / m
-    bal = pr
-    rows = [["Boshlanish", 0.0, 0.0, 0.0, pr]]
-    for i in range(1, m + 1):
-        interest = bal * r
-        total = principal + interest
-        bal -= principal
-        rows.append([f"{i}-oy", interest, principal, total, max(0.0, bal)])
-    return rows
-
-# === Jadvalni rasmga chizish ===
-def draw_png(rows: List[List], title: str, kredit_summa: float) -> BufferedInputFile:
-    headers = ["Sana", "Foizlar", "Asosiy qarz", "Oylik to‘lov", "Qoldiq summa"]
-    body = [headers]
-
-    for r in rows:
-        body.append([r[0], *[fmt(x) for x in r[1:]]])
-
-    jami_foiz = sum(r[1] for r in rows[1:])
-    jami_tolov = sum(r[3] for r in rows[1:])
-    body.append(["Jami", fmt(jami_foiz), fmt(kredit_summa), fmt(jami_tolov), "-"])
-
-    row_count = len(body)
-    fig, ax = plt.subplots(figsize=(10, 0.45 + row_count * 0.35))
-    ax.axis("off")
-
-    table = ax.table(cellText=body, loc="center", cellLoc="center")
-    table.auto_set_font_size(False)
-    table.set_fontsize(9 if row_count <= 26 else 7)
-    table.scale(1, 1.15)
-
-    for r in range(row_count):
-        for c in range(5):
-            cell = table[(r, c)]
-            if r == 0:
-                cell.set_facecolor("#cceeff")
-                cell.get_text().set_weight("bold")
-            elif r == row_count - 1:
-                cell.set_facecolor("#b3e6ff")
-                cell.get_text().set_weight("bold")
-            elif c == 3 and r not in (0, row_count - 1):
-                cell.set_facecolor("#e6e6e6")
-                cell.get_text().set_weight("bold")
-            elif r % 2 == 0 and r not in (0, row_count - 1):
-                cell.set_facecolor("#f9f9f9")
-            cell.set_edgecolor("black")
-            cell.set_linewidth(0.4)
-
-    plt.suptitle(title, fontsize=13, weight="bold")
-    buf = io.BytesIO()
-    plt.savefig(buf, dpi=300, format="png", bbox_inches="tight")
-    plt.close()
-    buf.seek(0)
-    return BufferedInputFile(buf.getvalue(), filename=f"{uuid.uuid4()}.png")
-
-# === /kredit — faqat admin uchun ===
-@router.message(F.text == "/kredit")
-async def start_kredit(msg: types.Message, state: FSMContext):
-    if msg.from_user.id != ADMIN_ID:
-        return await msg.answer("⛔ Sizda bu buyruqdan foydalanish huquqi yo‘q.")
-    await msg.answer("💰 Kredit summasini kiriting (100 000 – 1 000 000 000) so‘m:")
-    await state.set_state(KreditFSM.summa)
-
-# === Summani qabul qilish ===
-@router.message(KreditFSM.summa)
-async def get_sum(msg: types.Message, state: FSMContext):
-    summa_text = only_number(msg.text)  # faqat raqamlar
-    if not summa_text:
-        return await msg.answer("❗️Faqat raqam kiriting.")
-    summa = float(summa_text)
-    if not 100_000 <= summa <= 1_000_000_000:
-        return await msg.answer("❗️100 000 – 1 000 000 000 so‘m oralig‘ida kiriting.")
-    await state.update_data(summa=summa)
-    await msg.answer("📆 Kredit muddatini kiriting (1 – 300) oy:")
-    await state.set_state(KreditFSM.month)
-
-# === Muddat qabul qilish ===
-@router.message(KreditFSM.month)
-async def get_month(msg: types.Message, state: FSMContext):
-    oy_text = only_number(msg.text)  # faqat raqamlar
-    if not oy_text:
-        return await msg.answer("❗️Faqat raqam kiriting.")
-    month = int(oy_text)
-    if not 1 <= month <= 300:
-        return await msg.answer("❗️1 – 300 oy oralig‘ida kiriting.")
-    await state.update_data(month=month)   # <<— kalit nomi month
-    await msg.answer("📊 Foiz stavkasini kiriting (%):")
-    await state.set_state(KreditFSM.rate)
-
-# === Foiz stavkasi qabul qilish va natija ===
-@router.message(KreditFSM.rate)
-async def get_rate_and_result(msg: types.Message, bot: Bot, state: FSMContext):
-    rate_text = only_number(msg.text, allow_float=True)  # mas: 24 yoki 24.5
-    if not rate_text:
-        return await msg.answer("❗️Foiz stavkasini to‘g‘ri kiriting (masalan, 24).")
-    rate = float(rate_text)
-
-    data = await state.get_data()
-    summa: float = data["summa"]
-    months: int = data["month"]  # <<— mos keladi
-
-    # Jadvallar
-    ann_png = draw_png(
-        ann_table(summa, rate, months),
-        f"Kredit – {months} oy | Annuitet ({rate}%)",
-        summa,
-    )
-    diff_png = draw_png(
-        diff_table(summa, rate, months),
-        f"Kredit – {months} oy | Differensial ({rate}%)",
-        summa,
-    )
-
-    await bot.send_photo(msg.chat.id, ann_png, caption="📄 <b>Annuitet jadval</b>", parse_mode=ParseMode.HTML)
-    await bot.send_photo(msg.chat.id, diff_png, caption="📄 <b>Differensial jadval</b>", parse_mode=ParseMode.HTML)
-
-    await state.clear()

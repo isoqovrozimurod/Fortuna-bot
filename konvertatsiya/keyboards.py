@@ -1,4 +1,4 @@
-"""Inline tugmalar. callback_data prefiksi: 'konv:'."""
+"""Umumiy inline tugmalar. callback_data prefiksi: 'konv:'."""
 from __future__ import annotations
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -11,7 +11,8 @@ def btn(text: str, data: str) -> InlineKeyboardButton:
 
 
 def kb_menu() -> InlineKeyboardMarkup:
-    rows = [[btn(c.button, f"konv:pick:{c.key}")] for c in REGISTRY.values()]
+    tools = sorted(REGISTRY.values(), key=lambda t: t.order)
+    rows = [[btn(t.button, f"konv:pick:{t.key}")] for t in tools]
     rows.append([btn("⬅️ Bosh menyu", "back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -19,13 +20,6 @@ def kb_menu() -> InlineKeyboardMarkup:
 def kb_cancel() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [btn("⬅️ Ortga", "konv:menu"), btn("❌ Bekor qilish", "konv:cancel")],
-    ])
-
-
-def kb_name() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [btn("⏭ O'tkazib yuborish", "konv:skip")],
-        [btn("❌ Bekor qilish", "konv:cancel")],
     ])
 
 

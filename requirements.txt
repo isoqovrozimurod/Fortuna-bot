@@ -23,8 +23,9 @@ supabase==2.4.0
 # Geo
 geopy==2.4.1
 
-matplotlib==3.8.4
+
 Pillow
+pypdf>=4.0
 
 openpyxl
 

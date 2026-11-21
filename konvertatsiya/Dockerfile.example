@@ -1,0 +1,16 @@
+# Word/Excel/PowerPoint -> PDF uchun serverda LibreOffice kerak.
+# Koyeb'da: repo ildizida shu fayl "Dockerfile" nomi bilan turishi va
+# Service -> Build -> "Dockerfile" tanlanishi kerak (hozir Procfile/buildpack ishlatilmoqda).
+# Rasm va PDF vositalari LibreOffice'siz ham ishlaydi.
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libreoffice-writer libreoffice-calc libreoffice-impress \
+      fonts-dejavu-core fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["python", "main.py"]
